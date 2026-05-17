@@ -1,7 +1,9 @@
+import AppKit
 import SwiftUI
 
 @main
 struct SplatViewerApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = ViewerStore()
 
     var body: some Scene {
@@ -23,5 +25,12 @@ struct SplatViewerApp: App {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
             }
         }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }

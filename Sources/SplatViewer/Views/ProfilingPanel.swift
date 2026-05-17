@@ -36,11 +36,25 @@ struct ProfilingPanel: View {
                 SceneStatsView(diagnostics: diagnostics)
             }
 
+            if let statusMessage = store.statusMessage {
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             MetricSummary(title: "Frame", values: store.frameHistory.map(\.totalFrameMilliseconds), suffix: "ms")
             FrameGraph(frames: store.frameHistory)
                 .frame(height: 150)
 
             MetricSummary(title: "GPU", values: store.frameHistory.compactMap(\.gpuFrameMilliseconds), suffix: "ms")
+            HStack(spacing: 12) {
+                LegendItem(color: .blue, label: "Depth encode")
+                LegendItem(color: .orange, label: "Sort encode")
+                LegendItem(color: .green, label: "Draw encode")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
             MetricBars(frames: Array(store.frameHistory.suffix(80)))
                 .frame(height: 120)
 
@@ -135,15 +149,16 @@ private struct MetricBars: View {
     var body: some View {
         Canvas { context, size in
             guard !frames.isEmpty else { return }
-            let maxValue = max(frames.map(\.totalFrameMilliseconds).max() ?? 1, 1)
+            let maxValue = max(frames.map { frame in
+                (frame.depthKeyMilliseconds ?? 0) + (frame.sortMilliseconds ?? 0) + (frame.drawMilliseconds ?? 0)
+            }.max() ?? 1, 1)
             let barWidth = size.width / CGFloat(frames.count)
             for (index, frame) in frames.enumerated() {
                 var y = size.height
                 let segments: [(Double, Color)] = [
                     (frame.depthKeyMilliseconds ?? 0, .blue),
                     (frame.sortMilliseconds ?? 0, .orange),
-                    (frame.drawMilliseconds ?? 0, .green),
-                    (frame.cpuEncodeMilliseconds, .purple)
+                    (frame.drawMilliseconds ?? 0, .green)
                 ]
                 for (value, color) in segments {
                     let height = max(1, size.height * CGFloat(value / maxValue))
@@ -154,6 +169,20 @@ private struct MetricBars: View {
             }
         }
         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct LegendItem: View {
+    var color: Color
+    var label: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(label)
+        }
     }
 }
 

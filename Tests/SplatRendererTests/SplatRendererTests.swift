@@ -38,6 +38,43 @@ struct PLYLoaderTests {
         #expect(scene.splats[0].opacity > scene.splats[1].opacity)
     }
 
+    @Test("loads binary little-endian Gaussian PLY")
+    func loadsBinaryLittleEndianPLY() throws {
+        let header = [
+            "ply",
+            "format binary_little_endian 1.0",
+            "element vertex 1",
+            "property float x",
+            "property float y",
+            "property float z",
+            "property float f_dc_0",
+            "property float f_dc_1",
+            "property float f_dc_2",
+            "property float opacity",
+            "property float scale_0",
+            "property float scale_1",
+            "property float scale_2",
+            "property float rot_0",
+            "property float rot_1",
+            "property float rot_2",
+            "property float rot_3",
+            "end_header\n"
+        ].joined(separator: "\n")
+        var data = Data(header.utf8)
+        for value in [1, 2, 3, 0.1, 0.2, 0.3, 1, -4, -4, -4, 1, 0, 0, 0] as [Float] {
+            var bits = value.bitPattern.littleEndian
+            withUnsafeBytes(of: &bits) { data.append(contentsOf: $0) }
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("ply")
+        try data.write(to: url)
+
+        let scene = try SplatScene.load(url: url)
+        #expect(scene.count == 1)
+        #expect(scene.diagnostics.format == "binary_little_endian")
+        #expect(scene.splats[0].position == SIMD3<Float>(1, 2, 3))
+        #expect(scene.diagnostics.fieldAvailability.hasSHDC)
+    }
+
     @Test("reports missing position fields")
     func reportsMissingFields() throws {
         let url = try temporaryPLY("""

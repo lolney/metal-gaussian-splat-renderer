@@ -1,8 +1,10 @@
 import SplatRenderer
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var store: ViewerStore
+    @State private var didLoadLaunchArgument = false
 
     var body: some View {
         HSplitView {
@@ -15,6 +17,9 @@ struct ContentView: View {
                     .padding(12)
             }
             .frame(minWidth: 680)
+            .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
+                loadDroppedFile(providers: providers)
+            }
 
             if store.profilingVisible {
                 ProfilingPanel()
@@ -30,16 +35,16 @@ struct ContentView: View {
                     Label("Open", systemImage: "folder")
                 }
 
-                Picker("Sort", selection: $store.options.sortMode) {
+                Picker("Sort", selection: Binding(
+                    get: { store.options.sortMode },
+                    set: { store.selectSortMode($0) }
+                )) {
                     ForEach(SortMode.allCases) { mode in
                         Text(mode.rawValue.uppercased()).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 130)
-                .onChange(of: store.options.sortMode) { _, mode in
-                    store.markEvent("Sort: \(mode.rawValue)")
-                }
 
                 Toggle(isOn: $store.profilingVisible) {
                     Label("Profiling", systemImage: "chart.xyaxis.line")
@@ -51,6 +56,35 @@ struct ContentView: View {
         } message: {
             Text(store.loadError ?? "")
         }
+        .onAppear {
+            loadLaunchArgumentIfNeeded()
+        }
+    }
+
+    private func loadLaunchArgumentIfNeeded() {
+        guard !didLoadLaunchArgument else { return }
+        didLoadLaunchArgument = true
+        guard let path = CommandLine.arguments.dropFirst().first, path.hasSuffix(".ply") else { return }
+        store.load(url: URL(fileURLWithPath: path))
+    }
+
+    private func loadDroppedFile(providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) else {
+            return false
+        }
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+            let url: URL?
+            if let data = item as? Data {
+                url = URL(dataRepresentation: data, relativeTo: nil)
+            } else {
+                url = item as? URL
+            }
+            guard let url, url.pathExtension.lowercased() == "ply" else { return }
+            Task { @MainActor in
+                store.load(url: url)
+            }
+        }
+        return true
     }
 }
 

@@ -15,10 +15,16 @@ swift build
 ## Run Viewer
 
 ```bash
-swift run SplatViewer
+script/build_and_run.sh
 ```
 
 Use **Open** or `Command-O` to load a Gaussian `.ply`.
+
+To launch directly into a scene:
+
+```bash
+script/build_and_run.sh /path/to/scene.ply
+```
 
 ## Run Benchmarks
 
