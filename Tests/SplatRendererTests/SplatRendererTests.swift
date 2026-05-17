@@ -1,0 +1,98 @@
+import Foundation
+import Metal
+import Testing
+import simd
+@testable import SplatRenderer
+
+@Suite("PLY loader")
+struct PLYLoaderTests {
+    @Test("loads ASCII Gaussian PLY with SH color")
+    func loadsASCIIPLY() throws {
+        let url = try temporaryPLY("""
+        ply
+        format ascii 1.0
+        element vertex 2
+        property float x
+        property float y
+        property float z
+        property float scale_0
+        property float scale_1
+        property float scale_2
+        property float rot_0
+        property float rot_1
+        property float rot_2
+        property float rot_3
+        property float opacity
+        property float f_dc_0
+        property float f_dc_1
+        property float f_dc_2
+        end_header
+        0 0 0 -4 -4 -4 1 0 0 0 2 0.1 0.2 0.3
+        1 2 3 -5 -5 -5 1 0 0 0 -2 0.3 0.2 0.1
+        """)
+
+        let scene = try SplatScene.load(url: url)
+        #expect(scene.count == 2)
+        #expect(scene.diagnostics.fieldAvailability.hasSHDC)
+        #expect(scene.bounds.radius > 0)
+        #expect(scene.splats[0].opacity > scene.splats[1].opacity)
+    }
+
+    @Test("reports missing position fields")
+    func reportsMissingFields() throws {
+        let url = try temporaryPLY("""
+        ply
+        format ascii 1.0
+        element vertex 1
+        property float x
+        property float y
+        end_header
+        0 0
+        """)
+
+        #expect(throws: SplatError.self) {
+            _ = try SplatScene.load(url: url)
+        }
+    }
+
+    @Test("CPU sort orders far to near")
+    func cpuSortOrdersFarToNear() {
+        let splats = [
+            Splat(position: SIMD3<Float>(0, 0, -1), scale: .one, rotation: SIMD4<Float>(1, 0, 0, 0), opacity: 1, color: .one),
+            Splat(position: SIMD3<Float>(0, 0, -3), scale: .one, rotation: SIMD4<Float>(1, 0, 0, 0), opacity: 1, color: .one)
+        ]
+        let camera = Camera(viewMatrix: matrix_identity_float4x4, projectionMatrix: matrix_identity_float4x4, viewportSize: SIMD2<Float>(100, 100))
+        let sorted = SplatScene.sortedIndices(for: splats, camera: camera)
+        #expect(sorted == [1, 0])
+    }
+
+    @Test("renderer can draw tiny offscreen scene when Metal is available")
+    func rendererSmokeTest() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let splat = Splat(position: SIMD3<Float>(0, 0, 0), scale: SIMD3<Float>(repeating: 0.05), rotation: SIMD4<Float>(1, 0, 0, 0), opacity: 1, color: SIMD3<Float>(1, 0, 0))
+        let diagnostics = SplatDiagnostics(
+            sourceURL: nil,
+            format: "synthetic",
+            vertexCount: 1,
+            fieldAvailability: SplatFieldAvailability(hasSHDC: false, hasRGB: true, hasScale: true, hasRotation: true, hasOpacity: true),
+            bounds: SplatBounds(minimum: [0, 0, 0], maximum: [0, 0, 0], center: [0, 0, 0], radius: 1),
+            warnings: []
+        )
+        let scene = SplatScene(splats: [splat], diagnostics: diagnostics)
+        let renderer = try SplatRenderer(device: device)
+        try renderer.load(scene: scene)
+        let camera = renderer.makeDefaultCamera(width: 64, height: 64)
+        let stats = try renderer.drawOffscreen(size: SIMD2<Int32>(64, 64), camera: camera, options: RenderOptions(sortMode: .cpu, waitForGPU: true))
+        #expect(stats.totalSplats == 1)
+    }
+
+    private func temporaryPLY(_ contents: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("ply")
+        try contents.data(using: .utf8)!.write(to: url)
+        return url
+    }
+}
+
+private extension SIMD3 where Scalar == Float {
+    static var one: SIMD3<Float> { SIMD3<Float>(repeating: 1) }
+}
