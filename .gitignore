@@ -2,6 +2,7 @@
 .swiftpm/
 DerivedData/
 dist/
+BenchData/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcuserdata/
 *.gputrace/

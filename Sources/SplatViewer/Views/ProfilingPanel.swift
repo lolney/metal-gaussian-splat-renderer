@@ -194,6 +194,17 @@ private struct ControlsView: View {
             Toggle("Enable profiling", isOn: $store.options.enableProfiling)
             Toggle("Wait for GPU timings", isOn: $store.options.waitForGPU)
             HStack {
+                Text("Budget")
+                Stepper(value: Binding(
+                    get: { store.options.maxVisibleSplats },
+                    set: { store.options.maxVisibleSplats = $0 }
+                ), in: 0...max(store.scene?.count ?? 0, 1), step: 100_000) {
+                    Text(store.options.maxVisibleSplats == 0 ? "All" : store.options.maxVisibleSplats.formatted())
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(width: 86, alignment: .trailing)
+                }
+            }
+            HStack {
                 Text("Max radius")
                 Slider(value: Binding(
                     get: { Double(store.options.maxSplatRadius) },

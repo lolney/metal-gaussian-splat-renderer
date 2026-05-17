@@ -40,11 +40,11 @@ struct ContentView: View {
                     set: { store.selectSortMode($0) }
                 )) {
                     ForEach(SortMode.allCases) { mode in
-                        Text(mode.rawValue.uppercased()).tag(mode)
+                        Text(mode.displayName).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 130)
+                .frame(width: 210)
 
                 Toggle(isOn: $store.profilingVisible) {
                     Label("Profiling", systemImage: "chart.xyaxis.line")
@@ -96,18 +96,24 @@ private struct TimingOverlay: View {
             if let last = store.frameHistory.last {
                 Text(String(format: "%.2f ms  %.0f FPS", last.totalFrameMilliseconds, 1000 / max(last.totalFrameMilliseconds, 0.001)))
                     .font(.system(.headline, design: .monospaced))
-                Text("\(last.totalSplats) splats  \(last.sortMode.rawValue.uppercased()) sort")
+                Text("\(last.totalSplats) splats  \(last.sortMode.displayName) sort")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("Drop or open a Gaussian .ply")
+                Text(store.isLoading ? "Loading scene..." : "Drop or open a Gaussian .ply")
                     .font(.headline)
-                Text("No profiling frames yet")
+                Text(store.statusMessage ?? "No profiling frames yet")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(10)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private extension SortMode {
+    var displayName: String {
+        self == .none ? "STREAM" : rawValue.uppercased()
     }
 }

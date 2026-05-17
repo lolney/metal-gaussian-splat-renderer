@@ -20,7 +20,9 @@ public final class SplatRenderer {
     private var frameID = 0
     private var offscreenTexture: MTLTexture?
     private var offscreenSize = SIMD2<Int32>(0, 0)
+    private var lastStreamingDrawCount: Int?
     private let maxInflightBuffers = 3
+    private let retainedCPUSortLimit = 1_000_000
 
     public private(set) var sceneDiagnostics: SplatDiagnostics?
 
@@ -72,7 +74,7 @@ public final class SplatRenderer {
     }
 
     public func load(scene: SplatScene) throws {
-        sourceSplats = scene.splats
+        sourceSplats = scene.splats.count <= retainedCPUSortLimit ? scene.splats : []
         packedSplats = scene.packedSplats()
         sceneDiagnostics = scene.diagnostics
 
@@ -81,9 +83,9 @@ public final class SplatRenderer {
         splatBuffer?.label = "SplatRenderer.splats"
 
         let paddedCount = max(1, nextPowerOfTwo(packedSplats.count))
-        let pairs = (0..<paddedCount).map { SortPair(key: 0, index: $0 < packedSplats.count ? UInt32($0) : UInt32.max) }
-        orderBuffer = device.makeBuffer(bytes: pairs, length: pairs.count * MemoryLayout<SortPair>.stride, options: .storageModeShared)
+        orderBuffer = device.makeBuffer(length: paddedCount * MemoryLayout<SortPair>.stride, options: .storageModeShared)
         orderBuffer?.label = "SplatRenderer.order"
+        lastStreamingDrawCount = nil
     }
 
     public func draw(
@@ -106,7 +108,17 @@ public final class SplatRenderer {
 
         let splatCount = packedSplats.count
         let paddedCount = max(1, nextPowerOfTwo(splatCount))
-        let selectedSortMode = splatCount == 0 ? .cpu : options.sortMode
+        let requestedDrawCount = options.maxVisibleSplats > 0 ? min(options.maxVisibleSplats, splatCount) : splatCount
+        let drawCount = max(0, requestedDrawCount)
+        let sortPaddedCount = max(1, nextPowerOfTwo(max(drawCount, 1)))
+        let selectedSortMode: SortMode
+        if splatCount == 0 {
+            selectedSortMode = .none
+        } else if options.sortMode == .cpu, sourceSplats.isEmpty {
+            selectedSortMode = .none
+        } else {
+            selectedSortMode = options.sortMode
+        }
 
         guard let splatBuffer, let orderBuffer else {
             clearOnly(commandBuffer: commandBuffer, descriptor: renderPassDescriptor, drawable: drawable)
@@ -127,7 +139,7 @@ public final class SplatRenderer {
 
         let uniformBuffer = uniformBuffers[frameIndex % max(1, uniformBuffers.count)]
         frameIndex += 1
-        var uniforms = CameraUniforms(camera: camera, maxSplatRadius: options.maxSplatRadius)
+        var uniforms = CameraUniforms(camera: camera, maxSplatRadius: options.maxSplatRadius, enableCulling: options.enableCulling)
         memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<CameraUniforms>.stride)
 
         var depthKeyMilliseconds: Double?
@@ -139,17 +151,25 @@ public final class SplatRenderer {
                 splatBuffer: splatBuffer,
                 orderBuffer: orderBuffer,
                 uniformBuffer: uniformBuffer,
-                count: splatCount,
-                paddedCount: paddedCount
+                count: drawCount,
+                paddedCount: sortPaddedCount,
+                sourceCount: splatCount
             )
             depthKeyMilliseconds = milliseconds(since: depthStart)
 
             let sortStart = CFAbsoluteTimeGetCurrent()
-            encodeBitonicSort(commandBuffer: commandBuffer, orderBuffer: orderBuffer, count: splatCount, paddedCount: paddedCount)
+            encodeBitonicSort(commandBuffer: commandBuffer, orderBuffer: orderBuffer, count: drawCount, paddedCount: sortPaddedCount, sourceCount: splatCount)
             sortMilliseconds = milliseconds(since: sortStart)
         } else {
             let sortStart = CFAbsoluteTimeGetCurrent()
-            updateCPUOrder(camera: camera, orderBuffer: orderBuffer, paddedCount: paddedCount)
+            if selectedSortMode == .cpu {
+                updateCPUOrder(camera: camera, orderBuffer: orderBuffer, paddedCount: paddedCount)
+            } else {
+                if lastStreamingDrawCount != drawCount {
+                    updateStreamingOrder(orderBuffer: orderBuffer, splatCount: splatCount, drawCount: drawCount, paddedCount: paddedCount)
+                    lastStreamingDrawCount = drawCount
+                }
+            }
             sortMilliseconds = milliseconds(since: sortStart)
         }
 
@@ -161,7 +181,7 @@ public final class SplatRenderer {
         encoder?.setVertexBuffer(splatBuffer, offset: 0, index: 0)
         encoder?.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
         encoder?.setVertexBuffer(orderBuffer, offset: 0, index: 2)
-        encoder?.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: paddedCount)
+        encoder?.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: drawCount)
         encoder?.endEncoding()
         let drawMilliseconds = milliseconds(since: drawStart)
 
@@ -192,7 +212,7 @@ public final class SplatRenderer {
             drawMilliseconds: drawMilliseconds,
             presentMilliseconds: presentMilliseconds,
             totalFrameMilliseconds: milliseconds(since: totalStart),
-            visibleSplats: splatCount,
+            visibleSplats: drawCount,
             totalSplats: splatCount,
             sortMode: selectedSortMode
         )
@@ -239,7 +259,8 @@ public final class SplatRenderer {
         orderBuffer: MTLBuffer,
         uniformBuffer: MTLBuffer,
         count: Int,
-        paddedCount: Int
+        paddedCount: Int,
+        sourceCount: Int
     ) {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         encoder.label = "SplatRenderer.depthKeys"
@@ -247,13 +268,13 @@ public final class SplatRenderer {
         encoder.setBuffer(splatBuffer, offset: 0, index: 0)
         encoder.setBuffer(orderBuffer, offset: 0, index: 1)
         encoder.setBuffer(uniformBuffer, offset: 0, index: 2)
-        var constants = SortConstants(count: UInt32(count), paddedCount: UInt32(paddedCount), j: 0, k: 0)
+        var constants = SortConstants(count: UInt32(count), paddedCount: UInt32(paddedCount), j: 0, k: 0, sourceCount: UInt32(sourceCount))
         encoder.setBytes(&constants, length: MemoryLayout<SortConstants>.stride, index: 3)
         dispatch(encoder: encoder, pipeline: depthKeyPipeline, count: paddedCount)
         encoder.endEncoding()
     }
 
-    private func encodeBitonicSort(commandBuffer: MTLCommandBuffer, orderBuffer: MTLBuffer, count: Int, paddedCount: Int) {
+    private func encodeBitonicSort(commandBuffer: MTLCommandBuffer, orderBuffer: MTLBuffer, count: Int, paddedCount: Int, sourceCount: Int) {
         var k = 2
         while k <= paddedCount {
             var j = k / 2
@@ -262,7 +283,7 @@ public final class SplatRenderer {
                 encoder.label = "SplatRenderer.bitonicSort.k\(k).j\(j)"
                 encoder.setComputePipelineState(sortPipeline)
                 encoder.setBuffer(orderBuffer, offset: 0, index: 0)
-                var constants = SortConstants(count: UInt32(count), paddedCount: UInt32(paddedCount), j: UInt32(j), k: UInt32(k))
+                var constants = SortConstants(count: UInt32(count), paddedCount: UInt32(paddedCount), j: UInt32(j), k: UInt32(k), sourceCount: UInt32(sourceCount))
                 encoder.setBytes(&constants, length: MemoryLayout<SortConstants>.stride, index: 1)
                 dispatch(encoder: encoder, pipeline: sortPipeline, count: paddedCount)
                 encoder.endEncoding()
@@ -279,6 +300,25 @@ public final class SplatRenderer {
             if offset < sorted.count {
                 let index = sorted[offset]
                 pairsPointer[offset] = SortPair(key: UInt32(sorted.count - offset), index: index)
+            } else {
+                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
+            }
+        }
+    }
+
+    private func updateStreamingOrder(orderBuffer: MTLBuffer, splatCount: Int, drawCount: Int, paddedCount: Int) {
+        let pairsPointer = orderBuffer.contents().bindMemory(to: SortPair.self, capacity: paddedCount)
+        guard splatCount > 0, drawCount > 0 else {
+            for offset in 0..<paddedCount {
+                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
+            }
+            return
+        }
+        let stride = Double(splatCount) / Double(drawCount)
+        for offset in 0..<drawCount {
+            if offset < drawCount {
+                let index = min(splatCount - 1, Int(Double(offset) * stride))
+                pairsPointer[offset] = SortPair(key: UInt32(splatCount - index), index: UInt32(index))
             } else {
                 pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
             }
@@ -330,4 +370,5 @@ private struct SortConstants {
     var paddedCount: UInt32
     var j: UInt32
     var k: UInt32
+    var sourceCount: UInt32
 }

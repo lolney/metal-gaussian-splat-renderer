@@ -29,6 +29,7 @@ struct SortConstants {
     uint paddedCount;
     uint j;
     uint k;
+    uint sourceCount;
 };
 
 struct VertexOut {
@@ -73,11 +74,15 @@ kernel void depthKeyKernel(
         pairs[gid] = SortPair{0u, 0xffffffffu};
         return;
     }
-    float4 world = float4(splats[gid].positionAndOpacity.xyz, 1.0);
+    uint splatIndex = gid;
+    if (constants.sourceCount > constants.count && constants.count > 0) {
+        splatIndex = min(constants.sourceCount - 1, (uint)(((float)gid * (float)constants.sourceCount) / (float)constants.count));
+    }
+    float4 world = float4(splats[splatIndex].positionAndOpacity.xyz, 1.0);
     float4 view = camera.viewMatrix * world;
     float depth = max(-view.z, 0.0);
     uint key = min((uint)(depth * 100000.0), 0xfffffffeu);
-    pairs[gid] = SortPair{key, gid};
+    pairs[gid] = SortPair{key, splatIndex};
 }
 
 kernel void bitonicSortKernel(
@@ -144,6 +149,21 @@ vertex VertexOut splatVertex(
     float4 viewCenter = camera.viewMatrix * float4(position, 1.0);
     float4 clipCenter = camera.projectionMatrix * viewCenter;
     float depth = max(-viewCenter.z, 0.001);
+
+    if (camera.viewportAndRadius.w > 0.5) {
+        float margin = 1.25;
+        if (clipCenter.w <= 0.001 ||
+            clipCenter.x < -clipCenter.w * margin ||
+            clipCenter.x > clipCenter.w * margin ||
+            clipCenter.y < -clipCenter.w * margin ||
+            clipCenter.y > clipCenter.w * margin) {
+            out.position = float4(2.0, 2.0, 0.0, 1.0);
+            out.local = float2(8.0, 8.0);
+            out.color = float4(0.0);
+            out.opacity = 0.0;
+            return out;
+        }
+    }
 
     float3x3 rotation = quatToMatrix(splat.rotation);
     float3 axis0 = rotation[0] * scale.x;

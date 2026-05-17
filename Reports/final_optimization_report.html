@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Metal Gaussian Splat Renderer Optimization Report</title>
+<style>
+:root { color-scheme: light dark; --accent:#0a84ff; --good:#248a3d; --warn:#c26a00; --line:#9995; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 32px; line-height: 1.45; }
+main { max-width: 1180px; margin: 0 auto; }
+h1 { font-size: 30px; margin: 0 0 8px; }
+h2 { margin-top: 30px; border-top: 1px solid var(--line); padding-top: 18px; }
+.meta, td span { color: #777; font-size: 13px; }
+.cards { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin: 18px 0 24px; }
+.card { border:1px solid var(--line); border-radius:8px; padding:14px; }
+.card strong { display:block; font-size: 24px; }
+table { width:100%; border-collapse: collapse; font-size: 14px; }
+th, td { border-bottom:1px solid var(--line); padding: 9px 8px; vertical-align: middle; }
+th { text-align:left; }
+.num { text-align:right; font-variant-numeric: tabular-nums; }
+.bar { height: 10px; background: #8882; border-radius: 999px; overflow: hidden; min-width: 90px; }
+.bar i { display:block; height:100%; background: var(--accent); }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+ul { padding-left: 20px; }
+.good { color: var(--good); font-weight: 600; }
+.warn { color: var(--warn); font-weight: 600; }
+@media (max-width: 900px) { body { margin: 16px; } .cards { grid-template-columns: 1fr 1fr; } table { font-size:12px; } }
+</style>
+</head>
+<body><main>
+<h1>Metal Gaussian Splat Renderer Optimization Report</h1>
+<p class='meta'>Generated 2026-05-17 16:26. Device: Apple M2 Pro. Resolution: 640x360 offscreen. Each benchmark uses 10 frames with 3 warmup frames discarded unless noted.</p>
+<div class='cards'>
+  <div class='card'><span>Large scene</span><strong>5,998,962</strong><span>bicycle splats</span></div>
+  <div class='card'><span>Chosen steady mode</span><strong>15.72 ms</strong><span>500k stream + cull</span></div>
+  <div class='card'><span>Full 6M stream</span><strong>156.01 ms</strong><span>6.4 FPS</span></div>
+  <div class='card'><span>Speedup vs full</span><strong>9.9x</strong><span>with budgeted stream</span></div>
+</div>
+<h2>Executive Summary</h2>
+<ul>
+<li>Found and used a public multi-million scene: <code>bicycle</code> from NerfBaselines/Mip-NeRF360, with 5,998,962 splats. Source: <a href='https://huggingface.co/nerfbaselines/nerfbaselines/tree/27013b8f6867dfa9cfe051f8834824caa35c38f3/gaussian-splatting/mipnerf360'>Hugging Face NerfBaselines Gaussian Splatting checkpoints</a>.</li>
+<li>Replaced the binary PLY hot path with direct field extraction. This avoids per-row dictionaries and made 6M-splat loading practical in the app and CLI.</li>
+<li>Added budgeted streaming and budgeted sampled GPU-sort modes. Full 6M rendering is too slow at 156.01 ms/frame; 500k streaming reaches 15.72 ms/frame.</li>
+<li>Added coarse shader culling and kept it enabled. A 500k culling-on run measured 12.83 ms versus 16.73 ms with culling disabled in the A/B check.</li>
+<li>Steady state: <span class='good'>500k streaming + coarse culling</span> is the app default for scenes above 1M splats. 250k is faster (10.39 ms) but visibly sparser; GPU-sort improves ordering but costs 18.93 ms at 500k.</li>
+</ul>
+<h2>Final Benchmark Matrix</h2>
+<table>
+<thead><tr><th>Run</th><th>Scene</th><th>Mode</th><th class='num'>Visible / Total</th><th class='num'>Avg ms</th><th class='num'>P95 ms</th><th class='num'>FPS</th><th class='num'>Load</th><th class='num'>Renderer load</th><th>Relative frame time</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>bicycle_gpu_250k</code></td>
+  <td>bicycle</td>
+  <td>gpu</td>
+  <td class='num'>250,000 / 5,998,962<br><span>4.2%</span></td>
+  <td class='num'>17.43</td>
+  <td class='num'>20.97</td>
+  <td class='num'>57.4</td>
+  <td class='num'>24.9s</td>
+  <td class='num'>0.68s</td>
+  <td><div class='bar'><i style='width:11.2%'></i></div></td>
+</tr>
+<tr>
+  <td><code>bicycle_stream_250k</code></td>
+  <td>bicycle</td>
+  <td>stream</td>
+  <td class='num'>250,000 / 5,998,962<br><span>4.2%</span></td>
+  <td class='num'>10.39</td>
+  <td class='num'>11.72</td>
+  <td class='num'>96.2</td>
+  <td class='num'>25.1s</td>
+  <td class='num'>0.60s</td>
+  <td><div class='bar'><i style='width:6.7%'></i></div></td>
+</tr>
+<tr>
+  <td><code>bicycle_gpu_500k</code></td>
+  <td>bicycle</td>
+  <td>gpu</td>
+  <td class='num'>500,000 / 5,998,962<br><span>8.3%</span></td>
+  <td class='num'>18.93</td>
+  <td class='num'>19.72</td>
+  <td class='num'>52.8</td>
+  <td class='num'>23.8s</td>
+  <td class='num'>0.63s</td>
+  <td><div class='bar'><i style='width:12.1%'></i></div></td>
+</tr>
+<tr>
+  <td><code>bicycle_stream_500k</code></td>
+  <td>bicycle</td>
+  <td>stream</td>
+  <td class='num'>500,000 / 5,998,962<br><span>8.3%</span></td>
+  <td class='num'>15.72</td>
+  <td class='num'>18.55</td>
+  <td class='num'>63.6</td>
+  <td class='num'>24.7s</td>
+  <td class='num'>0.63s</td>
+  <td><div class='bar'><i style='width:10.1%'></i></div></td>
+</tr>
+<tr>
+  <td><code>bicycle_stream_750k</code></td>
+  <td>bicycle</td>
+  <td>stream</td>
+  <td class='num'>750,000 / 5,998,962<br><span>12.5%</span></td>
+  <td class='num'>23.79</td>
+  <td class='num'>25.77</td>
+  <td class='num'>42.0</td>
+  <td class='num'>23.7s</td>
+  <td class='num'>0.63s</td>
+  <td><div class='bar'><i style='width:15.2%'></i></div></td>
+</tr>
+<tr>
+  <td><code>bicycle_stream_1m</code></td>
+  <td>bicycle</td>
+  <td>stream</td>
+  <td class='num'>1,000,000 / 5,998,962<br><span>16.7%</span></td>
+  <td class='num'>30.72</td>
+  <td class='num'>34.71</td>
+  <td class='num'>32.6</td>
+  <td class='num'>21.7s</td>
+  <td class='num'>0.64s</td>
+  <td><div class='bar'><i style='width:19.7%'></i></div></td>
+</tr>
+<tr>
+  <td><code>bicycle_stream_full</code></td>
+  <td>bicycle</td>
+  <td>stream</td>
+  <td class='num'>5,998,962 / 5,998,962<br><span>100.0%</span></td>
+  <td class='num'>156.01</td>
+  <td class='num'>157.54</td>
+  <td class='num'>6.4</td>
+  <td class='num'>21.8s</td>
+  <td class='num'>0.67s</td>
+  <td><div class='bar'><i style='width:100.0%'></i></div></td>
+</tr>
+<tr>
+  <td><code>bonsai_stream_500k</code></td>
+  <td>bonsai</td>
+  <td>stream</td>
+  <td class='num'>500,000 / 1,247,650<br><span>40.1%</span></td>
+  <td class='num'>13.51</td>
+  <td class='num'>14.63</td>
+  <td class='num'>74.0</td>
+  <td class='num'>4.0s</td>
+  <td class='num'>0.12s</td>
+  <td><div class='bar'><i style='width:8.7%'></i></div></td>
+</tr>
+<tr>
+  <td><code>bonsai_stream_full</code></td>
+  <td>bonsai</td>
+  <td>stream</td>
+  <td class='num'>1,247,650 / 1,247,650<br><span>100.0%</span></td>
+  <td class='num'>33.32</td>
+  <td class='num'>37.71</td>
+  <td class='num'>30.0</td>
+  <td class='num'>4.4s</td>
+  <td class='num'>0.13s</td>
+  <td><div class='bar'><i style='width:21.4%'></i></div></td>
+</tr>
+<tr>
+  <td><code>inwild_gpu_full</code></td>
+  <td>in_the_wild_1</td>
+  <td>gpu</td>
+  <td class='num'>393,216 / 393,216<br><span>100.0%</span></td>
+  <td class='num'>13.52</td>
+  <td class='num'>14.34</td>
+  <td class='num'>74.0</td>
+  <td class='num'>1.3s</td>
+  <td class='num'>0.04s</td>
+  <td><div class='bar'><i style='width:8.7%'></i></div></td>
+</tr>
+<tr>
+  <td><code>inwild_stream_full</code></td>
+  <td>in_the_wild_1</td>
+  <td>stream</td>
+  <td class='num'>393,216 / 393,216<br><span>100.0%</span></td>
+  <td class='num'>11.70</td>
+  <td class='num'>14.48</td>
+  <td class='num'>85.4</td>
+  <td class='num'>1.2s</td>
+  <td class='num'>0.04s</td>
+  <td><div class='bar'><i style='width:7.5%'></i></div></td>
+</tr></tbody>
+</table>
+<h2>What Changed</h2>
+<ul>
+<li><strong>Milestone 7 optimization loop:</strong> added warmup-aware benchmark summaries, load/renderer-load timings, large-scene benchmark runs, lazy order-buffer initialization, direct binary PLY extraction, and coarse shader culling.</li>
+<li><strong>Milestone 8 experiments:</strong> added explicit streaming mode, visible-splat budgets, sampled GPU sort over only the budgeted subset, and coarse clip-space culling. Full tile/bin compositing was not promoted because the current bottleneck after budgeting is visual-density tradeoff and fragment cost, while tile binning would introduce blending-order risk and a much larger rewrite.</li>
+<li><strong>Viewer UX:</strong> large scenes load on a background task, auto-switch to streaming mode, set a 500k interactive budget, and show a persistent status message instead of freezing or silently changing modes.</li>
+</ul>
+<h2>Steady-State Decision</h2>
+<p>The renderer has reached a pragmatic steady state for this implementation generation. Further gains are possible only by accepting visible sparsity below 500k splats, dropping alpha-order quality with unsorted rendering, or replacing the renderer with a true tile/bin rasterizer and order-independent/transmittance compositing path. Those are larger algorithmic changes with correctness risk, so they should be treated as the next architecture phase rather than more tuning of this pass.</p>
+<h2>Reproduction</h2>
+<pre><code>script/build_and_run.sh BenchData/bicycle_point_cloud.ply
+swift run splatbench --input BenchData/bicycle_point_cloud.ply --frames 10 --warmup 3 --width 640 --height 360 --sort none --max-splats 500000 --output Reports/final-bench/bicycle_stream_500k.json</code></pre>
+</main></body></html>

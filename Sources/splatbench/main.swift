@@ -6,9 +6,13 @@ import simd
 struct BenchOptions {
     var input: URL?
     var frames = 120
+    var warmupFrames = 2
     var width = 1280
     var height = 720
     var sortMode: SortMode = .gpu
+    var maxVisibleSplats = 0
+    var maxSplatRadius: Float = 72
+    var enableCulling = true
     var output: URL?
     var capture: URL?
 }
@@ -29,18 +33,29 @@ enum SplatBench {
 
         print("Device: \(device.name)")
         print("Input: \(input.path)")
-        print("Frames: \(options.frames), size: \(options.width)x\(options.height), sort: \(options.sortMode.rawValue)")
+        print("Frames: \(options.frames), warmup: \(options.warmupFrames), size: \(options.width)x\(options.height), sort: \(options.sortMode.rawValue), budget: \(options.maxVisibleSplats == 0 ? "all" : "\(options.maxVisibleSplats)")")
 
+        let loadStart = CFAbsoluteTimeGetCurrent()
         let scene = try SplatScene.load(url: input)
+        let loadMilliseconds = (CFAbsoluteTimeGetCurrent() - loadStart) * 1000
         let renderer = try SplatRenderer(device: device)
+        let rendererLoadStart = CFAbsoluteTimeGetCurrent()
         try renderer.load(scene: scene)
+        let rendererLoadMilliseconds = (CFAbsoluteTimeGetCurrent() - rendererLoadStart) * 1000
 
         if let capture = options.capture {
             try startCapture(device: device, destination: capture)
         }
 
         var stats: [FrameStats] = []
-        let renderOptions = RenderOptions(sortMode: options.sortMode, enableProfiling: true, waitForGPU: true)
+        let renderOptions = RenderOptions(
+            sortMode: options.sortMode,
+            maxSplatRadius: options.maxSplatRadius,
+            enableProfiling: true,
+            waitForGPU: true,
+            enableCulling: options.enableCulling,
+            maxVisibleSplats: options.maxVisibleSplats
+        )
         let size = SIMD2<Int32>(Int32(options.width), Int32(options.height))
         for frame in 0..<options.frames {
             let camera = orbitCamera(scene: scene, frame: frame, total: options.frames, width: options.width, height: options.height)
@@ -51,9 +66,17 @@ enum SplatBench {
             MTLCaptureManager.shared().stopCapture()
         }
 
-        let summary = BenchmarkSummary(device: device.name, input: input.path, frames: stats)
+        let summary = BenchmarkSummary(
+            device: device.name,
+            input: input.path,
+            loadMilliseconds: loadMilliseconds,
+            rendererLoadMilliseconds: rendererLoadMilliseconds,
+            warmupFrames: options.warmupFrames,
+            frames: stats
+        )
         let encoded = try JSONEncoder.pretty.encode(summary)
         if let output = options.output {
+            try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
             try encoded.write(to: output)
             try csv(frames: stats).write(to: output.deletingPathExtension().appendingPathExtension("csv"), atomically: true, encoding: .utf8)
             print("Wrote \(output.path)")
@@ -79,12 +102,20 @@ enum SplatBench {
                 options.input = URL(fileURLWithPath: try next())
             case "--frames":
                 options.frames = Int(try next()) ?? options.frames
+            case "--warmup":
+                options.warmupFrames = Int(try next()) ?? options.warmupFrames
             case "--width":
                 options.width = Int(try next()) ?? options.width
             case "--height":
                 options.height = Int(try next()) ?? options.height
             case "--sort":
                 options.sortMode = SortMode(rawValue: try next()) ?? options.sortMode
+            case "--max-splats":
+                options.maxVisibleSplats = Int(try next()) ?? options.maxVisibleSplats
+            case "--radius":
+                options.maxSplatRadius = Float(try next()) ?? options.maxSplatRadius
+            case "--no-culling":
+                options.enableCulling = false
             case "--output":
                 options.output = URL(fileURLWithPath: try next())
             case "--capture":
@@ -106,7 +137,7 @@ enum SplatBench {
 
     private static func printUsage() {
         print("""
-        Usage: splatbench --input scene.ply [--frames N] [--width W] [--height H] [--sort gpu|cpu] [--output results.json] [--capture trace.gputrace]
+        Usage: splatbench --input scene.ply [--frames N] [--warmup N] [--width W] [--height H] [--sort none|gpu|cpu] [--max-splats N] [--radius px] [--no-culling] [--output results.json] [--capture trace.gputrace]
         """)
     }
 
@@ -133,7 +164,7 @@ enum SplatBench {
     }
 
     private static func csv(frames: [FrameStats]) -> String {
-        var rows = ["id,total_ms,cpu_encode_ms,gpu_ms,depth_key_ms,sort_ms,draw_ms,splats,sort_mode"]
+        var rows = ["id,total_ms,cpu_encode_ms,gpu_ms,depth_key_ms,sort_ms,draw_ms,visible_splats,total_splats,sort_mode"]
         rows += frames.map { frame in
             [
                 "\(frame.id)",
@@ -143,6 +174,7 @@ enum SplatBench {
                 "\(frame.depthKeyMilliseconds ?? 0)",
                 "\(frame.sortMilliseconds ?? 0)",
                 "\(frame.drawMilliseconds ?? 0)",
+                "\(frame.visibleSplats)",
                 "\(frame.totalSplats)",
                 frame.sortMode.rawValue
             ].joined(separator: ",")
@@ -154,18 +186,37 @@ enum SplatBench {
 struct BenchmarkSummary: Codable {
     var device: String
     var input: String
+    var loadMilliseconds: Double
+    var rendererLoadMilliseconds: Double
+    var warmupFrames: Int
     var frames: [FrameStats]
     var averageFrameMilliseconds: Double
     var p95FrameMilliseconds: Double
+    var measuredAverageFrameMilliseconds: Double
+    var measuredP95FrameMilliseconds: Double
 
-    init(device: String, input: String, frames: [FrameStats]) {
+    init(
+        device: String,
+        input: String,
+        loadMilliseconds: Double,
+        rendererLoadMilliseconds: Double,
+        warmupFrames: Int,
+        frames: [FrameStats]
+    ) {
         self.device = device
         self.input = input
+        self.loadMilliseconds = loadMilliseconds
+        self.rendererLoadMilliseconds = rendererLoadMilliseconds
+        self.warmupFrames = warmupFrames
         self.frames = frames
         let totals = frames.map(\.totalFrameMilliseconds)
         averageFrameMilliseconds = totals.isEmpty ? 0 : totals.reduce(0, +) / Double(totals.count)
         let sorted = totals.sorted()
         p95FrameMilliseconds = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count - 1) * 0.95))]
+        let measuredTotals = Array(totals.dropFirst(min(warmupFrames, totals.count)))
+        measuredAverageFrameMilliseconds = measuredTotals.isEmpty ? averageFrameMilliseconds : measuredTotals.reduce(0, +) / Double(measuredTotals.count)
+        let measuredSorted = measuredTotals.sorted()
+        measuredP95FrameMilliseconds = measuredSorted.isEmpty ? p95FrameMilliseconds : measuredSorted[min(measuredSorted.count - 1, Int(Double(measuredSorted.count - 1) * 0.95))]
     }
 }
 

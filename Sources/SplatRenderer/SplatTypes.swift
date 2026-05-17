@@ -22,6 +22,7 @@ public enum SplatError: Error, LocalizedError {
 }
 
 public enum SortMode: String, Codable, CaseIterable, Sendable, Identifiable {
+    case none
     case cpu
     case gpu
 
@@ -36,6 +37,7 @@ public struct RenderOptions: Codable, Sendable, Equatable {
     public var enableProfiling: Bool
     public var waitForGPU: Bool
     public var enableCulling: Bool
+    public var maxVisibleSplats: Int
 
     public init(
         sortMode: SortMode = .gpu,
@@ -44,7 +46,8 @@ public struct RenderOptions: Codable, Sendable, Equatable {
         maxSplatRadius: Float = 72,
         enableProfiling: Bool = true,
         waitForGPU: Bool = false,
-        enableCulling: Bool = true
+        enableCulling: Bool = true,
+        maxVisibleSplats: Int = 0
     ) {
         self.sortMode = sortMode
         self.resolutionScale = resolutionScale
@@ -53,6 +56,7 @@ public struct RenderOptions: Codable, Sendable, Equatable {
         self.enableProfiling = enableProfiling
         self.waitForGPU = waitForGPU
         self.enableCulling = enableCulling
+        self.maxVisibleSplats = maxVisibleSplats
     }
 }
 
@@ -177,11 +181,11 @@ public struct CameraUniforms {
     public var viewProjectionMatrix: simd_float4x4
     public var viewportAndRadius: SIMD4<Float>
 
-    public init(camera: Camera, maxSplatRadius: Float) {
+    public init(camera: Camera, maxSplatRadius: Float, enableCulling: Bool = true) {
         viewMatrix = camera.viewMatrix
         projectionMatrix = camera.projectionMatrix
         viewProjectionMatrix = camera.projectionMatrix * camera.viewMatrix
-        viewportAndRadius = SIMD4<Float>(camera.viewportSize.x, camera.viewportSize.y, maxSplatRadius, 0)
+        viewportAndRadius = SIMD4<Float>(camera.viewportSize.x, camera.viewportSize.y, maxSplatRadius, enableCulling ? 1 : 0)
     }
 }
 

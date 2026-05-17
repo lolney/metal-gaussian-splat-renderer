@@ -14,7 +14,7 @@ public struct SplatScene: Sendable {
     }
 
     public static func load(url: URL) throws -> SplatScene {
-        let data = try Data(contentsOf: url)
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
         return try PLYLoader.load(data: data, sourceURL: url)
     }
 
@@ -69,6 +69,9 @@ private struct PLYHeader {
 private enum PLYLoader {
     static func load(data: Data, sourceURL: URL?) throws -> SplatScene {
         let header = try parseHeader(data: data)
+        if header.format == .binaryLittleEndian {
+            return try parseBinaryLittleEndianScene(data: data, header: header, sourceURL: sourceURL)
+        }
         let rows: [[String: Float]]
         switch header.format {
         case .ascii:
@@ -77,6 +80,114 @@ private enum PLYLoader {
             rows = try parseBinaryLittleEndian(data: data, header: header)
         }
         return try makeScene(rows: rows, header: header, sourceURL: sourceURL)
+    }
+
+    private static func parseBinaryLittleEndianScene(data: Data, header: PLYHeader, sourceURL: URL?) throws -> SplatScene {
+        let names = Set(header.properties.map(\.name))
+        let required = ["x", "y", "z"]
+        let missing = required.filter { !names.contains($0) }
+        guard missing.isEmpty else {
+            throw SplatError.missingRequiredFields(missing)
+        }
+
+        let hasSHDC = names.isSuperset(of: ["f_dc_0", "f_dc_1", "f_dc_2"])
+        let hasRGB = names.isSuperset(of: ["red", "green", "blue"])
+        let hasScale = names.isSuperset(of: ["scale_0", "scale_1", "scale_2"])
+        let hasRotation = names.isSuperset(of: ["rot_0", "rot_1", "rot_2", "rot_3"])
+        let hasOpacity = names.contains("opacity")
+        var warnings: [String] = []
+        if !hasSHDC && !hasRGB {
+            warnings.append("No f_dc_* or RGB color fields found; using white.")
+        }
+        if !hasScale {
+            warnings.append("No scale_* fields found; using small isotropic splats.")
+        }
+        if !hasRotation {
+            warnings.append("No rot_* fields found; using identity rotation.")
+        }
+        if !hasOpacity {
+            warnings.append("No opacity field found; using opaque splats.")
+        }
+
+        var offsets: [String: (Int, PLYScalarType)] = [:]
+        var stride = 0
+        for property in header.properties {
+            offsets[property.name] = (stride, property.type)
+            stride += property.type.byteCount
+        }
+        let requiredBytes = header.dataOffset + stride * header.vertexCount
+        guard data.count >= requiredBytes else {
+            throw SplatError.invalidPLY("binary payload is shorter than vertex count requires")
+        }
+
+        func value(_ name: String, rowStart: Int, default defaultValue: Float = 0) throws -> Float {
+            guard let (offset, type) = offsets[name] else {
+                return defaultValue
+            }
+            return try readScalar(data: data, offset: rowStart + offset, type: type)
+        }
+
+        var splats: [Splat] = []
+        splats.reserveCapacity(header.vertexCount)
+        for rowIndex in 0..<header.vertexCount {
+            let rowStart = header.dataOffset + rowIndex * stride
+            let position = SIMD3<Float>(
+                try value("x", rowStart: rowStart),
+                try value("y", rowStart: rowStart),
+                try value("z", rowStart: rowStart)
+            )
+            let scale = hasScale
+                ? SIMD3<Float>(
+                    exp(try value("scale_0", rowStart: rowStart)),
+                    exp(try value("scale_1", rowStart: rowStart)),
+                    exp(try value("scale_2", rowStart: rowStart))
+                )
+                : SIMD3<Float>(repeating: 0.01)
+            let rotation = hasRotation
+                ? normalizedQuaternion(SIMD4<Float>(
+                    try value("rot_0", rowStart: rowStart, default: 1),
+                    try value("rot_1", rowStart: rowStart),
+                    try value("rot_2", rowStart: rowStart),
+                    try value("rot_3", rowStart: rowStart)
+                ))
+                : SIMD4<Float>(1, 0, 0, 0)
+            let opacity = hasOpacity ? sigmoid(try value("opacity", rowStart: rowStart)) : 1
+            let color: SIMD3<Float>
+            if hasSHDC {
+                let c0: Float = 0.28209479177387814
+                color = SIMD3<Float>(
+                    clamp(0.5 + c0 * (try value("f_dc_0", rowStart: rowStart)), 0, 1),
+                    clamp(0.5 + c0 * (try value("f_dc_1", rowStart: rowStart)), 0, 1),
+                    clamp(0.5 + c0 * (try value("f_dc_2", rowStart: rowStart)), 0, 1)
+                )
+            } else if hasRGB {
+                color = SIMD3<Float>(
+                    clamp((try value("red", rowStart: rowStart, default: 255)) / 255, 0, 1),
+                    clamp((try value("green", rowStart: rowStart, default: 255)) / 255, 0, 1),
+                    clamp((try value("blue", rowStart: rowStart, default: 255)) / 255, 0, 1)
+                )
+            } else {
+                color = SIMD3<Float>(repeating: 1)
+            }
+            splats.append(Splat(position: position, scale: scale, rotation: rotation, opacity: opacity, color: color))
+        }
+
+        let bounds = makeBounds(splats: splats)
+        let diagnostics = SplatDiagnostics(
+            sourceURL: sourceURL,
+            format: header.format.rawValue,
+            vertexCount: splats.count,
+            fieldAvailability: SplatFieldAvailability(
+                hasSHDC: hasSHDC,
+                hasRGB: hasRGB,
+                hasScale: hasScale,
+                hasRotation: hasRotation,
+                hasOpacity: hasOpacity
+            ),
+            bounds: bounds,
+            warnings: warnings
+        )
+        return SplatScene(splats: splats, diagnostics: diagnostics)
     }
 
     private static func parseHeader(data: Data) throws -> PLYHeader {
