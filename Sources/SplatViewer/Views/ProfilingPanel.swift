@@ -1,0 +1,196 @@
+import SplatRenderer
+import SwiftUI
+
+struct ProfilingPanel: View {
+    @EnvironmentObject private var store: ViewerStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Profiling")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    store.profilingPaused.toggle()
+                } label: {
+                    Image(systemName: store.profilingPaused ? "play.fill" : "pause.fill")
+                }
+                .help(store.profilingPaused ? "Resume metrics" : "Pause metrics")
+
+                Button {
+                    store.clearHistory()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .help("Clear history")
+
+                Button {
+                    store.exportProfilingData()
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .help("Export profiling data")
+            }
+
+            if let diagnostics = store.diagnostics {
+                SceneStatsView(diagnostics: diagnostics)
+            }
+
+            MetricSummary(title: "Frame", values: store.frameHistory.map(\.totalFrameMilliseconds), suffix: "ms")
+            FrameGraph(frames: store.frameHistory)
+                .frame(height: 150)
+
+            MetricSummary(title: "GPU", values: store.frameHistory.compactMap(\.gpuFrameMilliseconds), suffix: "ms")
+            MetricBars(frames: Array(store.frameHistory.suffix(80)))
+                .frame(height: 120)
+
+            ControlsView()
+
+            Spacer()
+        }
+        .padding(14)
+        .background(.thinMaterial)
+    }
+}
+
+private struct SceneStatsView: View {
+    var diagnostics: SplatDiagnostics
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(diagnostics.sourceURL?.lastPathComponent ?? "Loaded scene")
+                .font(.subheadline)
+                .lineLimit(1)
+            Text("\(diagnostics.vertexCount) splats  \(diagnostics.format)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(diagnostics.warnings, id: \.self) { warning in
+                Text(warning)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+            }
+        }
+    }
+}
+
+private struct MetricSummary: View {
+    var title: String
+    var values: [Double]
+    var suffix: String
+
+    var body: some View {
+        let stats = Summary(values: values)
+        HStack {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Spacer()
+            Text(String(format: "avg %.2f%@  p95 %.2f%@  min %.2f%@  max %.2f%@", stats.average, suffix, stats.p95, suffix, stats.minimum, suffix, stats.maximum, suffix))
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct FrameGraph: View {
+    var frames: [FrameStats]
+
+    var body: some View {
+        Canvas { context, size in
+            let values = frames.suffix(240).map(\.totalFrameMilliseconds)
+            guard values.count > 1 else { return }
+            let maxValue = max(values.max() ?? 16.67, 33.33)
+            drawBudgetLine(8.33, label: "120", context: &context, size: size, maxValue: maxValue)
+            drawBudgetLine(11.11, label: "90", context: &context, size: size, maxValue: maxValue)
+            drawBudgetLine(16.67, label: "60", context: &context, size: size, maxValue: maxValue)
+
+            var path = Path()
+            for (index, value) in values.enumerated() {
+                let x = size.width * CGFloat(index) / CGFloat(values.count - 1)
+                let y = size.height - size.height * CGFloat(value / maxValue)
+                if index == 0 {
+                    path.move(to: CGPoint(x: x, y: y))
+                } else {
+                    path.addLine(to: CGPoint(x: x, y: y))
+                }
+            }
+            context.stroke(path, with: .color(.accentColor), lineWidth: 2)
+        }
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func drawBudgetLine(_ milliseconds: Double, label: String, context: inout GraphicsContext, size: CGSize, maxValue: Double) {
+        let y = size.height - size.height * CGFloat(milliseconds / maxValue)
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: y))
+        path.addLine(to: CGPoint(x: size.width, y: y))
+        context.stroke(path, with: .color(.secondary.opacity(0.45)), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+        context.draw(Text(label).font(.caption2).foregroundStyle(.secondary), at: CGPoint(x: size.width - 16, y: y - 8))
+    }
+}
+
+private struct MetricBars: View {
+    var frames: [FrameStats]
+
+    var body: some View {
+        Canvas { context, size in
+            guard !frames.isEmpty else { return }
+            let maxValue = max(frames.map(\.totalFrameMilliseconds).max() ?? 1, 1)
+            let barWidth = size.width / CGFloat(frames.count)
+            for (index, frame) in frames.enumerated() {
+                var y = size.height
+                let segments: [(Double, Color)] = [
+                    (frame.depthKeyMilliseconds ?? 0, .blue),
+                    (frame.sortMilliseconds ?? 0, .orange),
+                    (frame.drawMilliseconds ?? 0, .green),
+                    (frame.cpuEncodeMilliseconds, .purple)
+                ]
+                for (value, color) in segments {
+                    let height = max(1, size.height * CGFloat(value / maxValue))
+                    y -= height
+                    let rect = CGRect(x: CGFloat(index) * barWidth, y: y, width: max(1, barWidth - 1), height: height)
+                    context.fill(Path(rect), with: .color(color.opacity(0.75)))
+                }
+            }
+        }
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct ControlsView: View {
+    @EnvironmentObject private var store: ViewerStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Enable profiling", isOn: $store.options.enableProfiling)
+            Toggle("Wait for GPU timings", isOn: $store.options.waitForGPU)
+            HStack {
+                Text("Max radius")
+                Slider(value: Binding(
+                    get: { Double(store.options.maxSplatRadius) },
+                    set: { store.options.maxSplatRadius = Float($0) }
+                ), in: 4...256)
+                Text("\(Int(store.options.maxSplatRadius))")
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 36, alignment: .trailing)
+            }
+        }
+        .font(.caption)
+    }
+}
+
+private struct Summary {
+    var minimum: Double = 0
+    var maximum: Double = 0
+    var average: Double = 0
+    var p95: Double = 0
+
+    init(values: [Double]) {
+        guard !values.isEmpty else { return }
+        let sorted = values.sorted()
+        minimum = sorted.first ?? 0
+        maximum = sorted.last ?? 0
+        average = values.reduce(0, +) / Double(values.count)
+        p95 = sorted[min(sorted.count - 1, Int(Double(sorted.count - 1) * 0.95))]
+    }
+}
