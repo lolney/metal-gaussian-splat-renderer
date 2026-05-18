@@ -12,7 +12,8 @@ public final class SplatRenderer {
     private let depthKeyPipeline: MTLComputePipelineState
     private let sortPipeline: MTLComputePipelineState
     private var splatBuffer: MTLBuffer?
-    private var orderBuffer: MTLBuffer?
+    private var modeStates: [SortMode: ModeState] = [:]
+    private var activeMode: SortMode?
     private var uniformBuffers: [MTLBuffer] = []
     private var packedSplats: [PackedSplat] = []
     private var sourceSplats: [Splat] = []
@@ -20,9 +21,7 @@ public final class SplatRenderer {
     private var frameID = 0
     private var offscreenTexture: MTLTexture?
     private var offscreenSize = SIMD2<Int32>(0, 0)
-    private var lastStreamingDrawCount: Int?
     private let maxInflightBuffers = 3
-    private let retainedCPUSortLimit = 1_000_000
 
     public private(set) var sceneDiagnostics: SplatDiagnostics?
 
@@ -74,7 +73,7 @@ public final class SplatRenderer {
     }
 
     public func load(scene: SplatScene) throws {
-        sourceSplats = scene.splats.count <= retainedCPUSortLimit ? scene.splats : []
+        sourceSplats = scene.splats
         packedSplats = scene.packedSplats()
         sceneDiagnostics = scene.diagnostics
 
@@ -82,10 +81,8 @@ public final class SplatRenderer {
         splatBuffer = device.makeBuffer(bytes: packedSplats, length: splatLength, options: .storageModeShared)
         splatBuffer?.label = "SplatRenderer.splats"
 
-        let paddedCount = max(1, nextPowerOfTwo(packedSplats.count))
-        orderBuffer = device.makeBuffer(length: paddedCount * MemoryLayout<SortPair>.stride, options: .storageModeShared)
-        orderBuffer?.label = "SplatRenderer.order"
-        lastStreamingDrawCount = nil
+        modeStates.removeAll(keepingCapacity: true)
+        activeMode = nil
     }
 
     public func draw(
@@ -113,14 +110,12 @@ public final class SplatRenderer {
         let sortPaddedCount = max(1, nextPowerOfTwo(max(drawCount, 1)))
         let selectedSortMode: SortMode
         if splatCount == 0 {
-            selectedSortMode = .none
-        } else if options.sortMode == .cpu, sourceSplats.isEmpty {
-            selectedSortMode = .none
+            selectedSortMode = .unsorted
         } else {
             selectedSortMode = options.sortMode
         }
 
-        guard let splatBuffer, let orderBuffer else {
+        guard let splatBuffer else {
             clearOnly(commandBuffer: commandBuffer, descriptor: renderPassDescriptor, drawable: drawable)
             return FrameStats(
                 id: frameID,
@@ -133,9 +128,14 @@ public final class SplatRenderer {
                 totalFrameMilliseconds: milliseconds(since: totalStart),
                 visibleSplats: 0,
                 totalSplats: 0,
-                sortMode: selectedSortMode
+                sortMode: selectedSortMode,
+                estimatedMemoryBytes: 0,
+                estimatedMemoryBandwidthGBps: nil
             )
         }
+
+        let orderPaddedCount = selectedSortMode == .gpu ? sortPaddedCount : paddedCount
+        let orderBuffer = try orderBuffer(for: selectedSortMode, paddedCount: orderPaddedCount)
 
         let uniformBuffer = uniformBuffers[frameIndex % max(1, uniformBuffers.count)]
         frameIndex += 1
@@ -165,10 +165,7 @@ public final class SplatRenderer {
             if selectedSortMode == .cpu {
                 updateCPUOrder(camera: camera, orderBuffer: orderBuffer, paddedCount: paddedCount)
             } else {
-                if lastStreamingDrawCount != drawCount {
-                    updateStreamingOrder(orderBuffer: orderBuffer, splatCount: splatCount, drawCount: drawCount, paddedCount: paddedCount)
-                    lastStreamingDrawCount = drawCount
-                }
+                updateUnsortedOrderIfNeeded(mode: selectedSortMode, orderBuffer: orderBuffer, splatCount: splatCount, drawCount: drawCount, paddedCount: paddedCount)
             }
             sortMilliseconds = milliseconds(since: sortStart)
         }
@@ -202,6 +199,13 @@ public final class SplatRenderer {
         } else {
             gpuMilliseconds = nil
         }
+        let estimatedMemoryBytes = estimateMemoryBytes(mode: selectedSortMode, drawCount: drawCount, sortPaddedCount: sortPaddedCount)
+        let estimatedBandwidthGBps: Double?
+        if let gpuMilliseconds, gpuMilliseconds > 0 {
+            estimatedBandwidthGBps = Double(estimatedMemoryBytes) / (gpuMilliseconds / 1000) / 1_000_000_000
+        } else {
+            estimatedBandwidthGBps = nil
+        }
 
         return FrameStats(
             id: frameID,
@@ -214,7 +218,9 @@ public final class SplatRenderer {
             totalFrameMilliseconds: milliseconds(since: totalStart),
             visibleSplats: drawCount,
             totalSplats: splatCount,
-            sortMode: selectedSortMode
+            sortMode: selectedSortMode,
+            estimatedMemoryBytes: estimatedMemoryBytes,
+            estimatedMemoryBandwidthGBps: estimatedBandwidthGBps
         )
     }
 
@@ -306,23 +312,52 @@ public final class SplatRenderer {
         }
     }
 
-    private func updateStreamingOrder(orderBuffer: MTLBuffer, splatCount: Int, drawCount: Int, paddedCount: Int) {
+    private func updateUnsortedOrderIfNeeded(mode: SortMode, orderBuffer: MTLBuffer, splatCount: Int, drawCount: Int, paddedCount: Int) {
+        guard modeStates[mode]?.preparedDrawCount != drawCount else { return }
+        writeUnsortedOrder(orderBuffer: orderBuffer, splatCount: splatCount, drawCount: drawCount, paddedCount: paddedCount)
+        modeStates[mode]?.preparedDrawCount = drawCount
+    }
+
+    private func writeUnsortedOrder(orderBuffer: MTLBuffer, splatCount: Int, drawCount: Int, paddedCount: Int) {
         let pairsPointer = orderBuffer.contents().bindMemory(to: SortPair.self, capacity: paddedCount)
-        guard splatCount > 0, drawCount > 0 else {
-            for offset in 0..<paddedCount {
-                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
-            }
-            return
-        }
+        guard splatCount > 0, drawCount > 0 else { return }
         let stride = Double(splatCount) / Double(drawCount)
         for offset in 0..<drawCount {
-            if offset < drawCount {
-                let index = min(splatCount - 1, Int(Double(offset) * stride))
-                pairsPointer[offset] = SortPair(key: UInt32(splatCount - index), index: UInt32(index))
-            } else {
-                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
-            }
+            let index = min(splatCount - 1, Int(Double(offset) * stride))
+            pairsPointer[offset] = SortPair(key: UInt32(splatCount - index), index: UInt32(index))
         }
+    }
+
+    private func orderBuffer(for mode: SortMode, paddedCount: Int) throws -> MTLBuffer {
+        if activeMode != mode {
+            modeStates[mode] = nil
+            activeMode = mode
+        }
+        if let state = modeStates[mode], state.paddedCount >= paddedCount {
+            return state.orderBuffer
+        }
+        guard let buffer = device.makeBuffer(length: paddedCount * MemoryLayout<SortPair>.stride, options: .storageModeShared) else {
+            throw SplatError.metalUnavailable
+        }
+        buffer.label = "SplatRenderer.order.\(mode.rawValue)"
+        modeStates[mode] = ModeState(orderBuffer: buffer, paddedCount: paddedCount, preparedDrawCount: nil)
+        return buffer
+    }
+
+    private func estimateMemoryBytes(mode: SortMode, drawCount: Int, sortPaddedCount: Int) -> UInt64 {
+        let splatStride = UInt64(MemoryLayout<PackedSplat>.stride)
+        let pairStride = UInt64(MemoryLayout<SortPair>.stride)
+        let vertexShaderReads = UInt64(drawCount) * 6 * (splatStride + pairStride)
+        let colorWrites = UInt64(drawCount) * 6 * 4
+        var total = vertexShaderReads + colorWrites
+        if mode == .gpu {
+            let sortCount = UInt64(sortPaddedCount)
+            let depthKeyBytes = sortCount * (splatStride + pairStride)
+            let stages = UInt64(bitonicStageCount(sortPaddedCount))
+            let sortBytes = stages * sortCount * pairStride * 2
+            total += depthKeyBytes + sortBytes
+        }
+        return total
     }
 
     private func dispatch(encoder: MTLComputeCommandEncoder, pipeline: MTLComputePipelineState, count: Int) {
@@ -360,9 +395,26 @@ public final class SplatRenderer {
         return power
     }
 
+    private func bitonicStageCount(_ value: Int) -> Int {
+        guard value > 1 else { return 0 }
+        var levels = 0
+        var n = value
+        while n > 1 {
+            levels += 1
+            n >>= 1
+        }
+        return levels * (levels + 1) / 2
+    }
+
     private func milliseconds(since start: CFAbsoluteTime) -> Double {
         (CFAbsoluteTimeGetCurrent() - start) * 1000
     }
+}
+
+private struct ModeState {
+    var orderBuffer: MTLBuffer
+    var paddedCount: Int
+    var preparedDrawCount: Int?
 }
 
 private struct SortConstants {

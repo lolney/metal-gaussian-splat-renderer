@@ -17,7 +17,6 @@ final class ViewerStore: ObservableObject {
     @Published var eventMarks: [ProfilingEvent] = []
 
     let maxHistory = 600
-    let interactiveCPUSortLimit = 100_000
     let interactiveGPUSortLimit = 1_000_000
     private var loadGeneration = 0
 
@@ -59,13 +58,10 @@ final class ViewerStore: ObservableObject {
 
     private func applyLoadedScene(_ loaded: SplatScene, filename: String) {
         scene = loaded
-        if loaded.count > interactiveCPUSortLimit, options.sortMode == .cpu {
-            options.sortMode = .gpu
-        }
         if loaded.count > interactiveGPUSortLimit, options.sortMode == .gpu {
-            options.sortMode = .none
+            options.sortMode = .unsorted
             options.maxVisibleSplats = min(max(options.maxVisibleSplats, 500_000), loaded.count)
-            statusMessage = "Large scene loaded in streaming mode. Use splatbench for full GPU-sort reference timings."
+            statusMessage = "Large scene loaded in unsorted mode with a 500k budget. GPU and CPU sort remain available, but they may be slow."
         } else {
             statusMessage = nil
         }
@@ -92,20 +88,12 @@ final class ViewerStore: ObservableObject {
     }
 
     func selectSortMode(_ mode: SortMode) {
-        if mode == .cpu, let scene, scene.count > interactiveCPUSortLimit {
-            options.sortMode = scene.count > interactiveGPUSortLimit ? .none : .gpu
-            statusMessage = "CPU sort is disabled above \(interactiveCPUSortLimit.formatted()) splats in the interactive viewer. Use splatbench --sort cpu for offline reference timings."
-            markEvent("CPU sort blocked for large scene")
-            return
-        }
-        if mode == .gpu, let scene, scene.count > interactiveGPUSortLimit {
-            options.sortMode = .none
-            statusMessage = "Full GPU bitonic sort is disabled above \(interactiveGPUSortLimit.formatted()) splats in the interactive viewer. Use streaming mode or splatbench for offline comparisons."
-            markEvent("GPU sort blocked for large scene")
-            return
-        }
         options.sortMode = mode
-        statusMessage = nil
+        if let scene, scene.count > interactiveGPUSortLimit, mode != .unsorted {
+            statusMessage = "\(mode.displayName) sort requested for a large scene. The renderer will reinitialize that mode's order buffer and may stall while sorting."
+        } else {
+            statusMessage = nil
+        }
         markEvent("Sort: \(mode.rawValue)")
     }
 

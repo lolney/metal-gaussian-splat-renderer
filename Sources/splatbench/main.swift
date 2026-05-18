@@ -109,7 +109,8 @@ enum SplatBench {
             case "--height":
                 options.height = Int(try next()) ?? options.height
             case "--sort":
-                options.sortMode = SortMode(rawValue: try next()) ?? options.sortMode
+                let rawMode = try next()
+                options.sortMode = rawMode == "none" ? .unsorted : (SortMode(rawValue: rawMode) ?? options.sortMode)
             case "--max-splats":
                 options.maxVisibleSplats = Int(try next()) ?? options.maxVisibleSplats
             case "--radius":
@@ -137,7 +138,7 @@ enum SplatBench {
 
     private static func printUsage() {
         print("""
-        Usage: splatbench --input scene.ply [--frames N] [--warmup N] [--width W] [--height H] [--sort none|gpu|cpu] [--max-splats N] [--radius px] [--no-culling] [--output results.json] [--capture trace.gputrace]
+        Usage: splatbench --input scene.ply [--frames N] [--warmup N] [--width W] [--height H] [--sort unsorted|gpu|cpu] [--max-splats N] [--radius px] [--no-culling] [--output results.json] [--capture trace.gputrace]
         """)
     }
 
@@ -164,7 +165,7 @@ enum SplatBench {
     }
 
     private static func csv(frames: [FrameStats]) -> String {
-        var rows = ["id,total_ms,cpu_encode_ms,gpu_ms,depth_key_ms,sort_ms,draw_ms,visible_splats,total_splats,sort_mode"]
+        var rows = ["id,total_ms,cpu_encode_ms,gpu_ms,depth_key_ms,sort_ms,draw_ms,estimated_memory_bytes,estimated_bandwidth_gbps,visible_splats,total_splats,sort_mode"]
         rows += frames.map { frame in
             [
                 "\(frame.id)",
@@ -174,6 +175,8 @@ enum SplatBench {
                 "\(frame.depthKeyMilliseconds ?? 0)",
                 "\(frame.sortMilliseconds ?? 0)",
                 "\(frame.drawMilliseconds ?? 0)",
+                "\(frame.estimatedMemoryBytes)",
+                "\(frame.estimatedMemoryBandwidthGBps ?? 0)",
                 "\(frame.visibleSplats)",
                 "\(frame.totalSplats)",
                 frame.sortMode.rawValue

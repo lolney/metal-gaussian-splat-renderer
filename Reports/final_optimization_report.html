@@ -32,17 +32,17 @@ ul { padding-left: 20px; }
 <p class='meta'>Generated 2026-05-17 16:26. Device: Apple M2 Pro. Resolution: 640x360 offscreen. Each benchmark uses 10 frames with 3 warmup frames discarded unless noted.</p>
 <div class='cards'>
   <div class='card'><span>Large scene</span><strong>5,998,962</strong><span>bicycle splats</span></div>
-  <div class='card'><span>Chosen steady mode</span><strong>15.72 ms</strong><span>500k stream + cull</span></div>
-  <div class='card'><span>Full 6M stream</span><strong>156.01 ms</strong><span>6.4 FPS</span></div>
-  <div class='card'><span>Speedup vs full</span><strong>9.9x</strong><span>with budgeted stream</span></div>
+  <div class='card'><span>Chosen steady mode</span><strong>15.72 ms</strong><span>500k unsorted + cull</span></div>
+  <div class='card'><span>Full 6M unsorted</span><strong>156.01 ms</strong><span>6.4 FPS</span></div>
+  <div class='card'><span>Speedup vs full</span><strong>9.9x</strong><span>with budgeted unsorted mode</span></div>
 </div>
 <h2>Executive Summary</h2>
 <ul>
 <li>Found and used a public multi-million scene: <code>bicycle</code> from NerfBaselines/Mip-NeRF360, with 5,998,962 splats. Source: <a href='https://huggingface.co/nerfbaselines/nerfbaselines/tree/27013b8f6867dfa9cfe051f8834824caa35c38f3/gaussian-splatting/mipnerf360'>Hugging Face NerfBaselines Gaussian Splatting checkpoints</a>.</li>
 <li>Replaced the binary PLY hot path with direct field extraction. This avoids per-row dictionaries and made 6M-splat loading practical in the app and CLI.</li>
-<li>Added budgeted streaming and budgeted sampled GPU-sort modes. Full 6M rendering is too slow at 156.01 ms/frame; 500k streaming reaches 15.72 ms/frame.</li>
+<li>Added budgeted unsorted and budgeted sampled GPU-sort modes. Full 6M unsorted rendering is too slow at 156.01 ms/frame; 500k unsorted reaches 15.72 ms/frame.</li>
 <li>Added coarse shader culling and kept it enabled. A 500k culling-on run measured 12.83 ms versus 16.73 ms with culling disabled in the A/B check.</li>
-<li>Steady state: <span class='good'>500k streaming + coarse culling</span> is the app default for scenes above 1M splats. 250k is faster (10.39 ms) but visibly sparser; GPU-sort improves ordering but costs 18.93 ms at 500k.</li>
+<li>Steady state: <span class='good'>500k unsorted + coarse culling</span> is the app default for scenes above 1M splats. 250k is faster (10.39 ms) but visibly sparser; GPU-sort improves ordering but costs 18.93 ms at 500k.</li>
 </ul>
 <h2>Final Benchmark Matrix</h2>
 <table>
@@ -61,9 +61,9 @@ ul { padding-left: 20px; }
   <td><div class='bar'><i style='width:11.2%'></i></div></td>
 </tr>
 <tr>
-  <td><code>bicycle_stream_250k</code></td>
+  <td><code>bicycle_unsorted_250k</code></td>
   <td>bicycle</td>
-  <td>stream</td>
+  <td>unsorted</td>
   <td class='num'>250,000 / 5,998,962<br><span>4.2%</span></td>
   <td class='num'>10.39</td>
   <td class='num'>11.72</td>
@@ -85,9 +85,9 @@ ul { padding-left: 20px; }
   <td><div class='bar'><i style='width:12.1%'></i></div></td>
 </tr>
 <tr>
-  <td><code>bicycle_stream_500k</code></td>
+  <td><code>bicycle_unsorted_500k</code></td>
   <td>bicycle</td>
-  <td>stream</td>
+  <td>unsorted</td>
   <td class='num'>500,000 / 5,998,962<br><span>8.3%</span></td>
   <td class='num'>15.72</td>
   <td class='num'>18.55</td>
@@ -97,9 +97,9 @@ ul { padding-left: 20px; }
   <td><div class='bar'><i style='width:10.1%'></i></div></td>
 </tr>
 <tr>
-  <td><code>bicycle_stream_750k</code></td>
+  <td><code>bicycle_unsorted_750k</code></td>
   <td>bicycle</td>
-  <td>stream</td>
+  <td>unsorted</td>
   <td class='num'>750,000 / 5,998,962<br><span>12.5%</span></td>
   <td class='num'>23.79</td>
   <td class='num'>25.77</td>
@@ -109,9 +109,9 @@ ul { padding-left: 20px; }
   <td><div class='bar'><i style='width:15.2%'></i></div></td>
 </tr>
 <tr>
-  <td><code>bicycle_stream_1m</code></td>
+  <td><code>bicycle_unsorted_1m</code></td>
   <td>bicycle</td>
-  <td>stream</td>
+  <td>unsorted</td>
   <td class='num'>1,000,000 / 5,998,962<br><span>16.7%</span></td>
   <td class='num'>30.72</td>
   <td class='num'>34.71</td>
@@ -121,9 +121,9 @@ ul { padding-left: 20px; }
   <td><div class='bar'><i style='width:19.7%'></i></div></td>
 </tr>
 <tr>
-  <td><code>bicycle_stream_full</code></td>
+  <td><code>bicycle_unsorted_full</code></td>
   <td>bicycle</td>
-  <td>stream</td>
+  <td>unsorted</td>
   <td class='num'>5,998,962 / 5,998,962<br><span>100.0%</span></td>
   <td class='num'>156.01</td>
   <td class='num'>157.54</td>
@@ -133,9 +133,9 @@ ul { padding-left: 20px; }
   <td><div class='bar'><i style='width:100.0%'></i></div></td>
 </tr>
 <tr>
-  <td><code>bonsai_stream_500k</code></td>
+  <td><code>bonsai_unsorted_500k</code></td>
   <td>bonsai</td>
-  <td>stream</td>
+  <td>unsorted</td>
   <td class='num'>500,000 / 1,247,650<br><span>40.1%</span></td>
   <td class='num'>13.51</td>
   <td class='num'>14.63</td>
@@ -145,9 +145,9 @@ ul { padding-left: 20px; }
   <td><div class='bar'><i style='width:8.7%'></i></div></td>
 </tr>
 <tr>
-  <td><code>bonsai_stream_full</code></td>
+  <td><code>bonsai_unsorted_full</code></td>
   <td>bonsai</td>
-  <td>stream</td>
+  <td>unsorted</td>
   <td class='num'>1,247,650 / 1,247,650<br><span>100.0%</span></td>
   <td class='num'>33.32</td>
   <td class='num'>37.71</td>
@@ -169,9 +169,9 @@ ul { padding-left: 20px; }
   <td><div class='bar'><i style='width:8.7%'></i></div></td>
 </tr>
 <tr>
-  <td><code>inwild_stream_full</code></td>
+  <td><code>inwild_unsorted_full</code></td>
   <td>in_the_wild_1</td>
-  <td>stream</td>
+  <td>unsorted</td>
   <td class='num'>393,216 / 393,216<br><span>100.0%</span></td>
   <td class='num'>11.70</td>
   <td class='num'>14.48</td>
@@ -181,15 +181,22 @@ ul { padding-left: 20px; }
   <td><div class='bar'><i style='width:7.5%'></i></div></td>
 </tr></tbody>
 </table>
+
+<h2>Profiling UI Clarification</h2>
+<ul>
+<li>The depth/sort/draw encode bars in the app show CPU command-encoding time, not GPU execution time. They used to look mostly blank because one warmup or mode-switch spike set the chart scale for the whole rolling window.</li>
+<li>The chart now scales by recent p95 encode cost and labels the scale, so steady-state bars are legible while clipped outliers do not flatten the graph.</li>
+<li>A new memory estimate graph reports approximate bytes touched per frame and estimated GB/s from command-buffer GPU time. It is not a hardware counter, but it makes bandwidth pressure visible when changing visible-splat budget, sort mode, or culling.</li>
+</ul>
 <h2>What Changed</h2>
 <ul>
 <li><strong>Milestone 7 optimization loop:</strong> added warmup-aware benchmark summaries, load/renderer-load timings, large-scene benchmark runs, lazy order-buffer initialization, direct binary PLY extraction, and coarse shader culling.</li>
-<li><strong>Milestone 8 experiments:</strong> added explicit streaming mode, visible-splat budgets, sampled GPU sort over only the budgeted subset, and coarse clip-space culling. Full tile/bin compositing was not promoted because the current bottleneck after budgeting is visual-density tradeoff and fragment cost, while tile binning would introduce blending-order risk and a much larger rewrite.</li>
-<li><strong>Viewer UX:</strong> large scenes load on a background task, auto-switch to streaming mode, set a 500k interactive budget, and show a persistent status message instead of freezing or silently changing modes.</li>
+<li><strong>Milestone 8 experiments:</strong> added explicit unsorted mode, visible-splat budgets, sampled GPU sort over only the budgeted subset, and coarse clip-space culling. Full tile/bin compositing was not promoted because the current bottleneck after budgeting is visual-density tradeoff and fragment cost, while tile binning would introduce blending-order risk and a much larger rewrite.</li>
+<li><strong>Viewer UX:</strong> large scenes load on a background task, auto-switch to unsorted mode, set a 500k interactive budget, and show a persistent status message instead of freezing or silently changing modes.</li>
 </ul>
 <h2>Steady-State Decision</h2>
 <p>The renderer has reached a pragmatic steady state for this implementation generation. Further gains are possible only by accepting visible sparsity below 500k splats, dropping alpha-order quality with unsorted rendering, or replacing the renderer with a true tile/bin rasterizer and order-independent/transmittance compositing path. Those are larger algorithmic changes with correctness risk, so they should be treated as the next architecture phase rather than more tuning of this pass.</p>
 <h2>Reproduction</h2>
 <pre><code>script/build_and_run.sh BenchData/bicycle_point_cloud.ply
-swift run splatbench --input BenchData/bicycle_point_cloud.ply --frames 10 --warmup 3 --width 640 --height 360 --sort none --max-splats 500000 --output Reports/final-bench/bicycle_stream_500k.json</code></pre>
+swift run splatbench --input BenchData/bicycle_point_cloud.ply --frames 10 --warmup 3 --width 640 --height 360 --sort unsorted --max-splats 500000 --output Reports/final-bench/bicycle_unsorted_500k.json</code></pre>
 </main></body></html>

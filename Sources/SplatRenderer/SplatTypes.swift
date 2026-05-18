@@ -21,12 +21,36 @@ public enum SplatError: Error, LocalizedError {
     }
 }
 
-public enum SortMode: String, Codable, CaseIterable, Sendable, Identifiable {
-    case none
+public enum SortMode: String, CaseIterable, Sendable, Identifiable, Codable {
+    case unsorted
     case cpu
     case gpu
 
     public var id: String { rawValue }
+    public var displayName: String {
+        switch self {
+        case .unsorted: "UNSORTED"
+        case .cpu: "CPU"
+        case .gpu: "GPU"
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        if rawValue == "none" {
+            self = .unsorted
+        } else if let mode = SortMode(rawValue: rawValue) {
+            self = mode
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown sort mode \(rawValue)")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 public struct RenderOptions: Codable, Sendable, Equatable {
@@ -73,6 +97,8 @@ public struct FrameStats: Codable, Sendable, Equatable, Identifiable {
     public var visibleSplats: Int
     public var totalSplats: Int
     public var sortMode: SortMode
+    public var estimatedMemoryBytes: UInt64
+    public var estimatedMemoryBandwidthGBps: Double?
 
     public init(
         id: Int,
@@ -86,7 +112,9 @@ public struct FrameStats: Codable, Sendable, Equatable, Identifiable {
         totalFrameMilliseconds: Double,
         visibleSplats: Int,
         totalSplats: Int,
-        sortMode: SortMode
+        sortMode: SortMode,
+        estimatedMemoryBytes: UInt64 = 0,
+        estimatedMemoryBandwidthGBps: Double? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -100,6 +128,8 @@ public struct FrameStats: Codable, Sendable, Equatable, Identifiable {
         self.visibleSplats = visibleSplats
         self.totalSplats = totalSplats
         self.sortMode = sortMode
+        self.estimatedMemoryBytes = estimatedMemoryBytes
+        self.estimatedMemoryBandwidthGBps = estimatedMemoryBandwidthGBps
     }
 }
 

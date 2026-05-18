@@ -123,6 +123,38 @@ struct PLYLoaderTests {
         #expect(stats.totalSplats == 1)
     }
 
+    @Test("renderer can switch sort modes without sharing order state")
+    func rendererSortModeSwitching() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let splats = (0..<8).map { index in
+            Splat(
+                position: SIMD3<Float>(Float(index) * 0.01, 0, Float(index) * -0.05),
+                scale: SIMD3<Float>(repeating: 0.03),
+                rotation: SIMD4<Float>(1, 0, 0, 0),
+                opacity: 1,
+                color: SIMD3<Float>(1, 0.5, 0.25)
+            )
+        }
+        let diagnostics = SplatDiagnostics(
+            sourceURL: nil,
+            format: "synthetic",
+            vertexCount: splats.count,
+            fieldAvailability: SplatFieldAvailability(hasSHDC: false, hasRGB: true, hasScale: true, hasRotation: true, hasOpacity: true),
+            bounds: SplatBounds(minimum: [0, 0, -0.35], maximum: [0.07, 0, 0], center: [0.035, 0, -0.175], radius: 1),
+            warnings: []
+        )
+        let renderer = try SplatRenderer(device: device)
+        try renderer.load(scene: SplatScene(splats: splats, diagnostics: diagnostics))
+        let camera = renderer.makeDefaultCamera(width: 64, height: 64)
+        let modes: [SortMode] = [.unsorted, .gpu, .cpu, .unsorted]
+        for mode in modes {
+            let stats = try renderer.drawOffscreen(size: SIMD2<Int32>(64, 64), camera: camera, options: RenderOptions(sortMode: mode, waitForGPU: true, maxVisibleSplats: 4))
+            #expect(stats.sortMode == mode)
+            #expect(stats.visibleSplats == 4)
+            #expect(stats.estimatedMemoryBytes > 0)
+        }
+    }
+
     private func temporaryPLY(_ contents: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("ply")
         try contents.data(using: .utf8)!.write(to: url)

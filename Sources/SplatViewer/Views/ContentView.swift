@@ -111,9 +111,3 @@ private struct TimingOverlay: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
     }
 }
-
-private extension SortMode {
-    var displayName: String {
-        self == .none ? "STREAM" : rawValue.uppercased()
-    }
-}

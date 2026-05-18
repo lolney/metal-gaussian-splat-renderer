@@ -1,3 +1,4 @@
+import Foundation
 import SplatRenderer
 import SwiftUI
 
@@ -48,6 +49,26 @@ struct ProfilingPanel: View {
                 .frame(height: 150)
 
             MetricSummary(title: "GPU", values: store.frameHistory.compactMap(\.gpuFrameMilliseconds), suffix: "ms")
+            MetricSummary(title: "Memory est.", values: store.frameHistory.compactMap(\.estimatedMemoryBandwidthGBps), suffix: " GB/s")
+            MemoryBandwidthGraph(frames: Array(store.frameHistory.suffix(120)))
+                .frame(height: 76)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text("CPU Encode Stages")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    if let scale = MetricBars.scaleValue(frames: Array(store.frameHistory.suffix(80))) {
+                        Text(String(format: "p95 scale %.3fms", scale))
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text("These bars are command encoding time. GPU work is summarized above; memory bandwidth is estimated from bytes touched per frame.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack(spacing: 12) {
                 LegendItem(color: .blue, label: "Depth encode")
                 LegendItem(color: .orange, label: "Sort encode")
@@ -149,9 +170,7 @@ private struct MetricBars: View {
     var body: some View {
         Canvas { context, size in
             guard !frames.isEmpty else { return }
-            let maxValue = max(frames.map { frame in
-                (frame.depthKeyMilliseconds ?? 0) + (frame.sortMilliseconds ?? 0) + (frame.drawMilliseconds ?? 0)
-            }.max() ?? 1, 1)
+            let maxValue = Self.scaleValue(frames: frames) ?? 1
             let barWidth = size.width / CGFloat(frames.count)
             for (index, frame) in frames.enumerated() {
                 var y = size.height
@@ -161,7 +180,8 @@ private struct MetricBars: View {
                     (frame.drawMilliseconds ?? 0, .green)
                 ]
                 for (value, color) in segments {
-                    let height = max(1, size.height * CGFloat(value / maxValue))
+                    let clippedValue = min(value, maxValue)
+                    let height = max(value > 0 ? 1 : 0, size.height * CGFloat(clippedValue / maxValue))
                     y -= height
                     let rect = CGRect(x: CGFloat(index) * barWidth, y: y, width: max(1, barWidth - 1), height: height)
                     context.fill(Path(rect), with: .color(color.opacity(0.75)))
@@ -169,6 +189,45 @@ private struct MetricBars: View {
             }
         }
         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    static func scaleValue(frames: [FrameStats]) -> Double? {
+        let totals = frames.map {
+            ($0.depthKeyMilliseconds ?? 0) + ($0.sortMilliseconds ?? 0) + ($0.drawMilliseconds ?? 0)
+        }.filter { $0 > 0 }
+        guard !totals.isEmpty else { return nil }
+        let sorted = totals.sorted()
+        return max(sorted[min(sorted.count - 1, Int(Double(sorted.count - 1) * 0.95))], 0.001)
+    }
+}
+
+private struct MemoryBandwidthGraph: View {
+    var frames: [FrameStats]
+
+    var body: some View {
+        Canvas { context, size in
+            let values = frames.map { $0.estimatedMemoryBandwidthGBps ?? 0 }
+            guard values.count > 1 else { return }
+            let sorted = values.filter { $0 > 0 }.sorted()
+            let scale = max(sorted.isEmpty ? 1 : sorted[min(sorted.count - 1, Int(Double(sorted.count - 1) * 0.95))], 1)
+            let barWidth = size.width / CGFloat(values.count)
+            for (index, value) in values.enumerated() {
+                let clippedValue = min(value, scale)
+                let height = size.height * CGFloat(clippedValue / scale)
+                let rect = CGRect(x: CGFloat(index) * barWidth, y: size.height - height, width: max(1, barWidth - 1), height: height)
+                context.fill(Path(rect), with: .color(.indigo.opacity(0.72)))
+            }
+            context.draw(Text(String(format: "%.1f GB/s p95", scale)).font(.caption2).foregroundStyle(.secondary), at: CGPoint(x: size.width - 42, y: 10))
+        }
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(alignment: .topLeading) {
+            if let last = frames.last {
+                Text("\(formatBytes(last.estimatedMemoryBytes))/frame")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+            }
+        }
     }
 }
 
@@ -184,6 +243,13 @@ private struct LegendItem: View {
             Text(label)
         }
     }
+}
+
+private func formatBytes(_ bytes: UInt64) -> String {
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .memory
+    formatter.allowedUnits = bytes > 1_000_000_000 ? [.useGB] : [.useMB]
+    return formatter.string(fromByteCount: Int64(bytes))
 }
 
 private struct ControlsView: View {
