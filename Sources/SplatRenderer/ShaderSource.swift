@@ -7,8 +7,8 @@ using namespace metal;
 
 struct PackedSplat {
     float4 positionAndOpacity;
-    float4 scaleAndFlags;
-    float4 rotation;
+    float4 covarianceA;
+    float4 covarianceB;
     float4 color;
 };
 
@@ -53,30 +53,13 @@ struct VertexOut {
     float opacity;
 };
 
-static float3x3 quatToMatrix(float4 q) {
-    float w = q.x;
-    float x = q.y;
-    float y = q.z;
-    float z = q.w;
-    float xx = x * x;
-    float yy = y * y;
-    float zz = z * z;
-    float xy = x * y;
-    float xz = x * z;
-    float yz = y * z;
-    float wx = w * x;
-    float wy = w * y;
-    float wz = w * z;
-    return float3x3(
-        float3(1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz), 2.0 * (xz - wy)),
-        float3(2.0 * (xy - wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx)),
-        float3(2.0 * (xz + wy), 2.0 * (yz - wx), 1.0 - 2.0 * (xx + yy))
+static float covMul(float3 lhs, float3 rhs, float xx, float xy, float xz, float yy, float yz, float zz) {
+    float3 product = float3(
+        xx * rhs.x + xy * rhs.y + xz * rhs.z,
+        xy * rhs.x + yy * rhs.y + yz * rhs.z,
+        xz * rhs.x + yz * rhs.y + zz * rhs.z
     );
-}
-
-static float2 projectNDC(constant CameraUniforms &camera, float3 position) {
-    float4 clip = camera.viewProjectionMatrix * float4(position, 1.0);
-    return clip.xy / max(abs(clip.w), 0.0001);
+    return dot(lhs, product);
 }
 
 static void covarianceEllipse(
@@ -85,33 +68,52 @@ static void covarianceEllipse(
     thread float2 &axis0,
     thread float2 &axis1
 ) {
-    float3 position = splat.positionAndOpacity.xyz;
-    float3 scale = max(splat.scaleAndFlags.xyz, float3(0.0001));
-    float3x3 rotation = quatToMatrix(splat.rotation);
     float2 viewport = max(camera.viewportAndRadius.xy, float2(1.0));
-    float2 center = projectNDC(camera, position);
+    float4 viewCenter = camera.viewMatrix * float4(splat.positionAndOpacity.xyz, 1.0);
+    float depth = max(-viewCenter.z, 0.0001);
+    float fx = abs(camera.projectionMatrix[0][0]) * viewport.x * 0.5;
+    float fy = abs(camera.projectionMatrix[1][1]) * viewport.y * 0.5;
+    float3 jacobianX = float3(fx / depth, 0.0, fx * viewCenter.x / (depth * depth));
+    float3 jacobianY = float3(0.0, fy / depth, fy * viewCenter.y / (depth * depth));
 
-    float3 worldAxis0 = rotation[0] * scale.x;
-    float3 worldAxis1 = rotation[1] * scale.y;
-    float3 worldAxis2 = rotation[2] * scale.z;
-    float2 p0 = (projectNDC(camera, position + worldAxis0) - center) * viewport * 0.5;
-    float2 p1 = (projectNDC(camera, position + worldAxis1) - center) * viewport * 0.5;
-    float2 p2 = (projectNDC(camera, position + worldAxis2) - center) * viewport * 0.5;
+    float3 viewRow0 = float3(camera.viewMatrix[0][0], camera.viewMatrix[1][0], camera.viewMatrix[2][0]);
+    float3 viewRow1 = float3(camera.viewMatrix[0][1], camera.viewMatrix[1][1], camera.viewMatrix[2][1]);
+    float3 viewRow2 = float3(camera.viewMatrix[0][2], camera.viewMatrix[1][2], camera.viewMatrix[2][2]);
+    float xx = splat.covarianceA.x;
+    float xy = splat.covarianceA.y;
+    float xz = splat.covarianceA.z;
+    float yy = splat.covarianceA.w;
+    float yz = splat.covarianceB.x;
+    float zz = splat.covarianceB.y;
+    float c00 = covMul(viewRow0, viewRow0, xx, xy, xz, yy, yz, zz);
+    float c01 = covMul(viewRow0, viewRow1, xx, xy, xz, yy, yz, zz);
+    float c02 = covMul(viewRow0, viewRow2, xx, xy, xz, yy, yz, zz);
+    float c11 = covMul(viewRow1, viewRow1, xx, xy, xz, yy, yz, zz);
+    float c12 = covMul(viewRow1, viewRow2, xx, xy, xz, yy, yz, zz);
+    float c22 = covMul(viewRow2, viewRow2, xx, xy, xz, yy, yz, zz);
+    float a = covMul(jacobianX, jacobianX, c00, c01, c02, c11, c12, c22);
+    float b = covMul(jacobianX, jacobianY, c00, c01, c02, c11, c12, c22);
+    float d = covMul(jacobianY, jacobianY, c00, c01, c02, c11, c12, c22);
 
-    float a = dot(float3(p0.x, p1.x, p2.x), float3(p0.x, p1.x, p2.x));
-    float b = dot(float3(p0.x, p1.x, p2.x), float3(p0.y, p1.y, p2.y));
-    float d = dot(float3(p0.y, p1.y, p2.y), float3(p0.y, p1.y, p2.y));
-    float trace = a + d;
-    float delta = sqrt(max((a - d) * (a - d) * 0.25 + b * b, 0.0));
-    float lambda0 = max(trace * 0.5 + delta, 1.0);
-    float lambda1 = max(trace * 0.5 - delta, 1.0);
-    float2 major = normalize(abs(b) > 0.00001 ? float2(lambda0 - d, b) : (a >= d ? float2(1.0, 0.0) : float2(0.0, 1.0)));
-    float2 minor = float2(-major.y, major.x);
+    float mid = (a + d) * 0.5;
+    float radius = length(float2((a - d) * 0.5, b));
+    float lambda0 = mid + radius;
+    float lambda1 = mid - radius;
+    if (lambda1 < 0.0 || !isfinite(lambda0) || !isfinite(lambda1)) {
+        axis0 = float2(0.0);
+        axis1 = float2(0.0);
+        return;
+    }
 
-    float2 radii = sqrt(float2(lambda0, lambda1)) * 3.0;
-    radii = clamp(radii, float2(1.0), float2(camera.viewportAndRadius.z));
-    axis0 = major * radii.x / viewport * 2.0;
-    axis1 = minor * radii.y / viewport * 2.0;
+    float2 diagonal = normalize(abs(b) > 0.000001 || abs(lambda0 - a) > 0.000001
+        ? float2(b, lambda0 - a)
+        : (a >= d ? float2(1.0, 0.0) : float2(0.0, 1.0)));
+    float majorRadius = min(sqrt(2.0 * max(lambda0, 0.0)), camera.viewportAndRadius.z);
+    float minorRadius = min(sqrt(2.0 * max(lambda1, 0.0)), camera.viewportAndRadius.z);
+    float2 majorAxis = majorRadius * diagonal;
+    float2 minorAxis = minorRadius * float2(diagonal.y, -diagonal.x);
+    axis0 = majorAxis / viewport;
+    axis1 = minorAxis / viewport;
 }
 
 kernel void depthKeyKernel(
@@ -310,12 +312,12 @@ vertex VertexOut projectedSplatVertex(
     device const ProjectedSplat *projected [[buffer(0)]]
 ) {
     constexpr float2 corners[6] = {
-        float2(-1.0, -1.0),
-        float2( 1.0, -1.0),
-        float2(-1.0,  1.0),
-        float2( 1.0, -1.0),
-        float2( 1.0,  1.0),
-        float2(-1.0,  1.0)
+        float2(-2.0, -2.0),
+        float2( 2.0, -2.0),
+        float2(-2.0,  2.0),
+        float2( 2.0, -2.0),
+        float2( 2.0,  2.0),
+        float2(-2.0,  2.0)
     };
 
     ProjectedSplat splat = projected[instanceID];
@@ -323,7 +325,7 @@ vertex VertexOut projectedSplatVertex(
     float2 ndcOffset = splat.axis0Opacity.xy * corner.x + splat.axis1.xy * corner.y;
     VertexOut out;
     out.position = splat.clipCenter + float4(ndcOffset * splat.clipCenter.w, 0.0, 0.0);
-    out.local = corner * 3.0;
+    out.local = corner;
     out.color = splat.color;
     out.opacity = splat.axis0Opacity.z;
     return out;
@@ -337,12 +339,12 @@ vertex VertexOut splatVertex(
     device const SortPair *pairs [[buffer(2)]]
 ) {
     constexpr float2 corners[6] = {
-        float2(-1.0, -1.0),
-        float2( 1.0, -1.0),
-        float2(-1.0,  1.0),
-        float2( 1.0, -1.0),
-        float2( 1.0,  1.0),
-        float2(-1.0,  1.0)
+        float2(-2.0, -2.0),
+        float2( 2.0, -2.0),
+        float2(-2.0,  2.0),
+        float2( 2.0, -2.0),
+        float2( 2.0,  2.0),
+        float2(-2.0,  2.0)
     };
 
     uint splatIndex = pairs[instanceID].index;
@@ -358,12 +360,10 @@ vertex VertexOut splatVertex(
     PackedSplat splat = splats[splatIndex];
     float3 position = splat.positionAndOpacity.xyz;
     float opacity = splat.positionAndOpacity.w;
-    float3 scale = max(splat.scaleAndFlags.xyz, float3(0.0001));
     float2 corner = corners[vertexID];
 
     float4 viewCenter = camera.viewMatrix * float4(position, 1.0);
     float4 clipCenter = camera.projectionMatrix * viewCenter;
-    float depth = max(-viewCenter.z, 0.001);
 
     if (camera.viewportAndRadius.w > 0.5) {
         float margin = 1.25;
@@ -380,30 +380,24 @@ vertex VertexOut splatVertex(
         }
     }
 
-    float3x3 rotation = quatToMatrix(splat.rotation);
-    float3 axis0 = rotation[0] * scale.x;
-    float3 axis1 = rotation[1] * scale.y;
-    float3 viewAxis0 = (camera.viewMatrix * float4(axis0, 0.0)).xyz;
-    float3 viewAxis1 = (camera.viewMatrix * float4(axis1, 0.0)).xyz;
-
-    float focalPixels = abs(camera.projectionMatrix[1][1]) * camera.viewportAndRadius.y * 0.5;
-    float2 radiusPixels = float2(length(viewAxis0.xy), length(viewAxis1.xy)) * focalPixels / depth * 3.0;
-    radiusPixels = clamp(radiusPixels, float2(1.0), float2(camera.viewportAndRadius.z));
-    float2 ndcOffset = corner * radiusPixels / max(camera.viewportAndRadius.xy, float2(1.0)) * 2.0;
+    float2 axis0;
+    float2 axis1;
+    covarianceEllipse(camera, splat, axis0, axis1);
+    float2 ndcOffset = axis0 * corner.x + axis1 * corner.y;
 
     out.position = clipCenter + float4(ndcOffset * clipCenter.w, 0.0, 0.0);
-    out.local = corner * 3.0;
+    out.local = corner;
     out.color = splat.color;
     out.opacity = opacity;
     return out;
 }
 
 fragment float4 splatFragment(VertexOut in [[stage_in]]) {
-    float falloff = exp(-0.5 * dot(in.local, in.local));
-    float alpha = clamp(in.opacity * falloff, 0.0, 1.0);
-    if (alpha < 0.003) {
+    float exponent = -dot(in.local, in.local);
+    if (exponent < -4.0) {
         discard_fragment();
     }
+    float alpha = clamp(exp(exponent) * in.opacity, 0.0, 1.0);
     return float4(in.color.rgb * alpha, alpha);
 }
 """#

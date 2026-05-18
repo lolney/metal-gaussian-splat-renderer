@@ -2,6 +2,18 @@ import Foundation
 import simd
 
 public extension simd_float4x4 {
+    static func perspective(fx: Float, fy: Float, sourceWidth: Float, sourceHeight: Float, nearZ: Float, farZ: Float) -> simd_float4x4 {
+        let x = 2 * fx / max(sourceWidth, 1)
+        let y = 2 * fy / max(sourceHeight, 1)
+        let z = farZ / (nearZ - farZ)
+        return simd_float4x4(columns: (
+            SIMD4<Float>(x, 0, 0, 0),
+            SIMD4<Float>(0, y, 0, 0),
+            SIMD4<Float>(0, 0, z, -1),
+            SIMD4<Float>(0, 0, z * nearZ, 0)
+        ))
+    }
+
     static func perspective(fovyRadians: Float, aspect: Float, nearZ: Float, farZ: Float) -> simd_float4x4 {
         let y = 1 / tan(fovyRadians * 0.5)
         let x = y / aspect

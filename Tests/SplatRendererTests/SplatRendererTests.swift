@@ -103,6 +103,24 @@ struct PLYLoaderTests {
         #expect(sorted == [1, 0])
     }
 
+    @Test("packed splats store reference-scaled covariance")
+    func packedSplatStoresReferenceCovariance() {
+        let splat = Splat(
+            position: .zero,
+            scale: SIMD3<Float>(2, 3, 4),
+            rotation: SIMD4<Float>(1, 0, 0, 0),
+            opacity: 1,
+            color: .one
+        )
+        let packed = PackedSplat(splat)
+        #expect(packed.covarianceA.x == 16)
+        #expect(packed.covarianceA.y == 0)
+        #expect(packed.covarianceA.z == 0)
+        #expect(packed.covarianceA.w == 36)
+        #expect(packed.covarianceB.x == 0)
+        #expect(packed.covarianceB.y == 64)
+    }
+
     @Test("renderer can draw tiny offscreen scene when Metal is available")
     func rendererSmokeTest() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }

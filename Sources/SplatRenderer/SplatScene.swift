@@ -171,6 +171,7 @@ private enum PLYLoader {
             }
             splats.append(Splat(position: position, scale: scale, rotation: rotation, opacity: opacity, color: color))
         }
+        sortByRenderImportance(&splats)
 
         let bounds = makeBounds(splats: splats)
         let diagnostics = SplatDiagnostics(
@@ -345,7 +346,7 @@ private enum PLYLoader {
             warnings.append("No opacity field found; using opaque splats.")
         }
 
-        let splats = rows.map { row in
+        var splats = rows.map { row in
             let position = SIMD3<Float>(row["x"] ?? 0, row["y"] ?? 0, row["z"] ?? 0)
             let scale = hasScale
                 ? SIMD3<Float>(exp(row["scale_0"] ?? -5), exp(row["scale_1"] ?? -5), exp(row["scale_2"] ?? -5))
@@ -373,6 +374,7 @@ private enum PLYLoader {
             }
             return Splat(position: position, scale: scale, rotation: rotation, opacity: opacity, color: color)
         }
+        sortByRenderImportance(&splats)
 
         let bounds = makeBounds(splats: splats)
         let diagnostics = SplatDiagnostics(
@@ -410,5 +412,15 @@ private enum PLYLoader {
             center: [center.x, center.y, center.z],
             radius: radius
         )
+    }
+
+    private static func sortByRenderImportance(_ splats: inout [Splat]) {
+        splats.sort { lhs, rhs in
+            renderImportance(lhs) > renderImportance(rhs)
+        }
+    }
+
+    private static func renderImportance(_ splat: Splat) -> Float {
+        splat.scale.x * splat.scale.y * splat.scale.z * splat.opacity
     }
 }

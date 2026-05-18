@@ -274,11 +274,25 @@ private struct ControlsView: View {
                 }
             }
             HStack {
+                Text("Quick budget")
+                Spacer()
+                Menu {
+                    ForEach(availableBudgetPresets, id: \.value) { preset in
+                        Button(preset.label) {
+                            store.options.maxVisibleSplats = preset.value
+                        }
+                    }
+                } label: {
+                    Text("Preset")
+                }
+                .menuStyle(.borderlessButton)
+            }
+            HStack {
                 Text("Max radius")
                 Slider(value: Binding(
                     get: { Double(store.options.maxSplatRadius) },
                     set: { store.options.maxSplatRadius = Float($0) }
-                ), in: 4...256)
+                ), in: 4...1024)
                 Text("\(Int(store.options.maxSplatRadius))")
                     .font(.system(.caption, design: .monospaced))
                     .frame(width: 36, alignment: .trailing)
@@ -286,6 +300,19 @@ private struct ControlsView: View {
         }
         .font(.caption)
     }
+
+    private var availableBudgetPresets: [BudgetPreset] {
+        let count = store.scene?.count ?? 0
+        let fixed = [500_000, 1_000_000, 2_000_000, 4_000_000]
+            .filter { count == 0 || $0 <= count }
+            .map { BudgetPreset(value: $0, label: $0.formatted()) }
+        return fixed + [BudgetPreset(value: 0, label: "All")]
+    }
+}
+
+private struct BudgetPreset {
+    var value: Int
+    var label: String
 }
 
 private struct Summary {

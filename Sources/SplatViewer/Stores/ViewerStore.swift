@@ -60,8 +60,10 @@ final class ViewerStore: ObservableObject {
         scene = loaded
         if loaded.count > interactiveGPUSortLimit, options.sortMode == .gpu {
             options.sortMode = .unsorted
-            options.maxVisibleSplats = min(max(options.maxVisibleSplats, 500_000), loaded.count)
-            statusMessage = "Large scene loaded in unsorted mode with a 500k budget. GPU radix, CPU radix, and bitonic reference modes remain available, but they may be slow."
+            if options.maxVisibleSplats > 0 {
+                options.maxVisibleSplats = min(options.maxVisibleSplats, loaded.count)
+            }
+            statusMessage = "Large scene loaded in unsorted mode. Use the budget presets for faster previews, or GPU radix for a slower sorted reference."
         } else {
             statusMessage = nil
         }

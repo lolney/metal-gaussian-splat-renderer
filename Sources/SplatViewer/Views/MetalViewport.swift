@@ -23,6 +23,12 @@ struct MetalViewport: NSViewRepresentable {
         view.framebufferOnly = true
         view.delegate = context.coordinator
         view.cameraController = context.coordinator.cameraController
+        view.onCameraPresetSelected = { preset in
+            Task { @MainActor in
+                context.coordinator.store.statusMessage = "Bicycle camera \(preset.id) (\(preset.imageName)) selected. Drag, pan, or zoom to return to orbit controls."
+                context.coordinator.store.markEvent("Camera preset \(preset.id)")
+            }
+        }
         context.coordinator.configure(device: device, view: view)
         return view
     }
@@ -61,6 +67,10 @@ struct MetalViewport: NSViewRepresentable {
             do {
                 try renderer?.load(scene: scene)
                 cameraController.focus(bounds: scene.bounds)
+                if let url = scene.diagnostics.sourceURL, BicycleCameraPreset.isBicycleScene(url), let preset = BicycleCameraPreset.preset(for: 0) {
+                    cameraController.useSavedCamera(preset)
+                    store.statusMessage = "Using saved bicycle camera 0 (\(preset.imageName)). Press 0-9 to switch saved bicycle cameras; drag, pan, or zoom to return to orbit controls."
+                }
                 loadedVertexCount = scene.count
             } catch {
                 store.loadError = error.localizedDescription
@@ -105,6 +115,7 @@ struct MetalViewport: NSViewRepresentable {
 
 final class InteractiveMTKView: MTKView {
     var cameraController: OrbitCameraController?
+    var onCameraPresetSelected: ((BicycleCameraPreset) -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -123,6 +134,20 @@ final class InteractiveMTKView: MTKView {
     override func scrollWheel(with event: NSEvent) {
         cameraController?.zoom(delta: Float(event.scrollingDeltaY))
     }
+
+    override func keyDown(with event: NSEvent) {
+        guard
+            let characters = event.charactersIgnoringModifiers,
+            characters.count == 1,
+            let key = characters.first?.wholeNumberValue,
+            let preset = BicycleCameraPreset.preset(for: key)
+        else {
+            super.keyDown(with: event)
+            return
+        }
+        cameraController?.useSavedCamera(preset)
+        onCameraPresetSelected?(preset)
+    }
 }
 
 final class OrbitCameraController {
@@ -131,6 +156,7 @@ final class OrbitCameraController {
     private var yaw: Float = 0
     private var pitch: Float = 0
     private var distance: Float = 3
+    private var savedCamera: BicycleCameraPreset?
 
     func focus(bounds: SplatBounds) {
         center = SIMD3<Float>(bounds.center[0], bounds.center[1], bounds.center[2])
@@ -138,14 +164,21 @@ final class OrbitCameraController {
         distance = radius * 3
         yaw = 0
         pitch = 0
+        savedCamera = nil
+    }
+
+    func useSavedCamera(_ preset: BicycleCameraPreset) {
+        savedCamera = preset
     }
 
     func orbit(deltaX: Float, deltaY: Float) {
+        savedCamera = nil
         yaw -= deltaX * 0.008
         pitch = clamp(pitch - deltaY * 0.008, -1.45, 1.45)
     }
 
     func pan(deltaX: Float, deltaY: Float) {
+        savedCamera = nil
         let scale = distance * 0.0015
         let right = SIMD3<Float>(cos(yaw), 0, -sin(yaw))
         let up = SIMD3<Float>(0, 1, 0)
@@ -154,10 +187,14 @@ final class OrbitCameraController {
     }
 
     func zoom(delta: Float) {
+        savedCamera = nil
         distance = clamp(distance * (1 - delta * 0.0015), radius * 0.05, radius * 50)
     }
 
     func camera(width: Int, height: Int) -> Camera {
+        if let savedCamera {
+            return savedCamera.camera(width: width, height: height)
+        }
         let cp = cos(pitch)
         let direction = SIMD3<Float>(sin(yaw) * cp, sin(pitch), cos(yaw) * cp)
         let eye = center + direction * distance

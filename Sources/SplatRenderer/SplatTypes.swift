@@ -70,7 +70,7 @@ public struct RenderOptions: Codable, Sendable, Equatable {
         sortMode: SortMode = .gpu,
         resolutionScale: Float = 1,
         sphericalHarmonicsDegree: Int = 0,
-        maxSplatRadius: Float = 72,
+        maxSplatRadius: Float = 1024,
         enableProfiling: Bool = true,
         waitForGPU: Bool = false,
         enableCulling: Bool = true,
@@ -189,15 +189,58 @@ public struct SplatDiagnostics: Codable, Sendable, Equatable {
 
 public struct PackedSplat {
     public var positionAndOpacity: SIMD4<Float>
-    public var scaleAndFlags: SIMD4<Float>
-    public var rotation: SIMD4<Float>
+    public var covarianceA: SIMD4<Float>
+    public var covarianceB: SIMD4<Float>
     public var color: SIMD4<Float>
 
     public init(_ splat: Splat) {
         positionAndOpacity = SIMD4<Float>(splat.position.x, splat.position.y, splat.position.z, splat.opacity)
-        scaleAndFlags = SIMD4<Float>(splat.scale.x, splat.scale.y, splat.scale.z, 0)
-        rotation = splat.rotation
+        let covariance = Self.worldCovariance(scale: splat.scale, rotation: splat.rotation)
+        covarianceA = SIMD4<Float>(covariance.xx, covariance.xy, covariance.xz, covariance.yy)
+        covarianceB = SIMD4<Float>(covariance.yz, covariance.zz, 0, 0)
         color = SIMD4<Float>(splat.color.x, splat.color.y, splat.color.z, 1)
+    }
+
+    private static func worldCovariance(scale: SIMD3<Float>, rotation q: SIMD4<Float>) -> (
+        xx: Float,
+        xy: Float,
+        xz: Float,
+        yy: Float,
+        yz: Float,
+        zz: Float
+    ) {
+        let w = q.x
+        let x = q.y
+        let y = q.z
+        let z = q.w
+        let rotation = [
+            1 - 2 * (y * y + z * z),
+            2 * (x * y + w * z),
+            2 * (x * z - w * y),
+            2 * (x * y - w * z),
+            1 - 2 * (x * x + z * z),
+            2 * (y * z + w * x),
+            2 * (x * z + w * y),
+            2 * (y * z - w * x),
+            1 - 2 * (x * x + y * y)
+        ]
+        let scaled = rotation.enumerated().map { index, value in
+            value * scale[index / 3]
+        }
+        let sigmaXX = scaled[0] * scaled[0] + scaled[3] * scaled[3] + scaled[6] * scaled[6]
+        let sigmaXY = scaled[0] * scaled[1] + scaled[3] * scaled[4] + scaled[6] * scaled[7]
+        let sigmaXZ = scaled[0] * scaled[2] + scaled[3] * scaled[5] + scaled[6] * scaled[8]
+        let sigmaYY = scaled[1] * scaled[1] + scaled[4] * scaled[4] + scaled[7] * scaled[7]
+        let sigmaYZ = scaled[1] * scaled[2] + scaled[4] * scaled[5] + scaled[7] * scaled[8]
+        let sigmaZZ = scaled[2] * scaled[2] + scaled[5] * scaled[5] + scaled[8] * scaled[8]
+        return (
+            4 * sigmaXX,
+            4 * sigmaXY,
+            4 * sigmaXZ,
+            4 * sigmaYY,
+            4 * sigmaYZ,
+            4 * sigmaZZ
+        )
     }
 }
 

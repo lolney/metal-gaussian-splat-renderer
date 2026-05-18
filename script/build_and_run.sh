@@ -13,4 +13,8 @@ for arg in "$@"; do
   fi
 done
 
-open -n "$ROOT/dist/SplatViewer.app" --args "${ARGS[@]}"
+if [[ ${#ARGS[@]} -gt 0 ]]; then
+  open -n "$ROOT/dist/SplatViewer.app" --args "${ARGS[@]}"
+else
+  open -n "$ROOT/dist/SplatViewer.app"
+fi

@@ -11,7 +11,7 @@ struct BenchOptions {
     var height = 720
     var sortMode: SortMode = .gpu
     var maxVisibleSplats = 0
-    var maxSplatRadius: Float = 72
+    var maxSplatRadius: Float = 1024
     var enableCulling = true
     var useProjectionCache = false
     var output: URL?
