@@ -6,6 +6,8 @@ Apple Silicon-first Gaussian splat renderer scaffold with:
 - `SplatViewer`: macOS SwiftUI + MetalKit viewer for Gaussian `.ply` files.
 - `splatbench`: headless benchmark runner with JSON/CSV timing output and optional Metal capture.
 
+<img width="1449" height="1057" alt="image" src="https://github.com/user-attachments/assets/9e114430-0165-40a9-a783-c946089cf5c2" />
+
 ## Build
 
 ```bash
