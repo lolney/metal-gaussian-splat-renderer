@@ -5,23 +5,22 @@ import QuartzCore
 import simd
 
 public final class SplatRenderer {
+    private static let maxInflightBuffers = 3
+
     public let device: MTLDevice
     public let commandQueue: MTLCommandQueue
 
     private let renderPipeline: MTLRenderPipelineState
     private let depthKeyPipeline: MTLComputePipelineState
     private let sortPipeline: MTLComputePipelineState
-    private var splatBuffer: MTLBuffer?
-    private var modeStates: [SortMode: ModeState] = [:]
-    private var activeMode: SortMode?
-    private var uniformBuffers: [MTLBuffer] = []
-    private var packedSplats: [PackedSplat] = []
-    private var sourceSplats: [Splat] = []
+    private var sceneResources: SceneResources?
+    private var cpuSortSplats: [Splat] = []
+    private var frameResources: [FrameResources] = []
     private var frameIndex = 0
     private var frameID = 0
     private var offscreenTexture: MTLTexture?
     private var offscreenSize = SIMD2<Int32>(0, 0)
-    private let maxInflightBuffers = 3
+    private let inflightSemaphore = DispatchSemaphore(value: SplatRenderer.maxInflightBuffers)
 
     public private(set) var sceneDiagnostics: SplatDiagnostics?
 
@@ -65,24 +64,25 @@ public final class SplatRenderer {
         depthKeyPipeline = try device.makeComputePipelineState(function: depth)
         sortPipeline = try device.makeComputePipelineState(function: sort)
 
-        uniformBuffers = (0..<maxInflightBuffers).compactMap { index in
-            let buffer = device.makeBuffer(length: MemoryLayout<CameraUniforms>.stride, options: .storageModeShared)
-            buffer?.label = "SplatRenderer.cameraUniforms.\(index)"
-            return buffer
+        var resources: [FrameResources] = []
+        for index in 0..<Self.maxInflightBuffers {
+            guard let buffer = device.makeBuffer(length: MemoryLayout<CameraUniforms>.stride, options: .storageModeShared) else {
+                throw SplatError.metalUnavailable
+            }
+            buffer.label = "SplatRenderer.cameraUniforms.\(index)"
+            resources.append(FrameResources(uniformBuffer: buffer))
         }
+        frameResources = resources
     }
 
     public func load(scene: SplatScene) throws {
-        sourceSplats = scene.splats
-        packedSplats = scene.packedSplats()
+        waitForInflightResources()
+        cpuSortSplats = scene.splats
         sceneDiagnostics = scene.diagnostics
 
-        let splatLength = max(1, packedSplats.count) * MemoryLayout<PackedSplat>.stride
-        splatBuffer = device.makeBuffer(bytes: packedSplats, length: splatLength, options: .storageModeShared)
-        splatBuffer?.label = "SplatRenderer.splats"
-
-        modeStates.removeAll(keepingCapacity: true)
-        activeMode = nil
+        sceneResources = try makeSceneResources(packedSplats: scene.packedSplats())
+        resetFrameResourceState()
+        frameIndex = 0
     }
 
     public func draw(
@@ -98,13 +98,24 @@ public final class SplatRenderer {
         let encodeStart = CFAbsoluteTimeGetCurrent()
         frameID += 1
 
+        inflightSemaphore.wait()
+        var commandBufferCommitted = false
+        defer {
+            if !commandBufferCommitted {
+                inflightSemaphore.signal()
+            }
+        }
+
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             throw SplatError.metalUnavailable
         }
         commandBuffer.label = "SplatRenderer.frame.\(frameID)"
+        let semaphore = inflightSemaphore
+        commandBuffer.addCompletedHandler { _ in
+            semaphore.signal()
+        }
 
-        let splatCount = packedSplats.count
-        let paddedCount = max(1, nextPowerOfTwo(splatCount))
+        let splatCount = sceneResources?.splatCount ?? 0
         let requestedDrawCount = options.maxVisibleSplats > 0 ? min(options.maxVisibleSplats, splatCount) : splatCount
         let drawCount = max(0, requestedDrawCount)
         let sortPaddedCount = max(1, nextPowerOfTwo(max(drawCount, 1)))
@@ -115,8 +126,9 @@ public final class SplatRenderer {
             selectedSortMode = options.sortMode
         }
 
-        guard let splatBuffer else {
+        guard let sceneResources else {
             clearOnly(commandBuffer: commandBuffer, descriptor: renderPassDescriptor, drawable: drawable)
+            commandBufferCommitted = true
             return FrameStats(
                 id: frameID,
                 cpuEncodeMilliseconds: milliseconds(since: encodeStart),
@@ -133,12 +145,17 @@ public final class SplatRenderer {
                 estimatedMemoryBandwidthGBps: nil
             )
         }
+        let splatBuffer = sceneResources.splatBuffer
 
-        let orderPaddedCount = selectedSortMode == .gpu ? sortPaddedCount : paddedCount
-        let orderBuffer = try orderBuffer(for: selectedSortMode, paddedCount: orderPaddedCount)
-
-        let uniformBuffer = uniformBuffers[frameIndex % max(1, uniformBuffers.count)]
+        let resourceIndex = frameIndex % max(1, frameResources.count)
         frameIndex += 1
+        var frameResource = frameResources[resourceIndex]
+        let requestedOrderCapacity = selectedSortMode == .gpu ? sortPaddedCount : max(drawCount, 1)
+        let orderAllocation = try orderBuffer(for: selectedSortMode, paddedCount: requestedOrderCapacity, frameResource: &frameResource)
+        let orderBuffer = orderAllocation.buffer
+        let orderCapacity = orderAllocation.capacity
+
+        let uniformBuffer = frameResource.uniformBuffer
         var uniforms = CameraUniforms(camera: camera, maxSplatRadius: options.maxSplatRadius, enableCulling: options.enableCulling)
         memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<CameraUniforms>.stride)
 
@@ -163,12 +180,20 @@ public final class SplatRenderer {
         } else {
             let sortStart = CFAbsoluteTimeGetCurrent()
             if selectedSortMode == .cpu {
-                updateCPUOrder(camera: camera, orderBuffer: orderBuffer, paddedCount: paddedCount)
+                updateCPUOrder(camera: camera, orderBuffer: orderBuffer, drawCount: drawCount, paddedCount: orderCapacity)
             } else {
-                updateUnsortedOrderIfNeeded(mode: selectedSortMode, orderBuffer: orderBuffer, splatCount: splatCount, drawCount: drawCount, paddedCount: paddedCount)
+                updateUnsortedOrderIfNeeded(
+                    mode: selectedSortMode,
+                    orderBuffer: orderBuffer,
+                    splatCount: splatCount,
+                    drawCount: drawCount,
+                    paddedCount: orderCapacity,
+                    frameResource: &frameResource
+                )
             }
             sortMilliseconds = milliseconds(since: sortStart)
         }
+        frameResources[resourceIndex] = frameResource
 
         let drawStart = CFAbsoluteTimeGetCurrent()
         let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor)
@@ -189,6 +214,7 @@ public final class SplatRenderer {
         let presentMilliseconds = milliseconds(since: presentStart)
 
         commandBuffer.commit()
+        commandBufferCommitted = true
         if options.enableProfiling || options.waitForGPU || drawable == nil {
             commandBuffer.waitUntilCompleted()
         }
@@ -299,11 +325,12 @@ public final class SplatRenderer {
         }
     }
 
-    private func updateCPUOrder(camera: Camera, orderBuffer: MTLBuffer, paddedCount: Int) {
-        let sorted = SplatScene.sortedIndices(for: sourceSplats, camera: camera)
+    private func updateCPUOrder(camera: Camera, orderBuffer: MTLBuffer, drawCount: Int, paddedCount: Int) {
+        let sorted = SplatScene.sortedIndices(for: cpuSortSplats, camera: camera)
         let pairsPointer = orderBuffer.contents().bindMemory(to: SortPair.self, capacity: paddedCount)
+        let writableCount = min(drawCount, sorted.count, paddedCount)
         for offset in 0..<paddedCount {
-            if offset < sorted.count {
+            if offset < writableCount {
                 let index = sorted[offset]
                 pairsPointer[offset] = SortPair(key: UInt32(sorted.count - offset), index: index)
             } else {
@@ -312,36 +339,99 @@ public final class SplatRenderer {
         }
     }
 
-    private func updateUnsortedOrderIfNeeded(mode: SortMode, orderBuffer: MTLBuffer, splatCount: Int, drawCount: Int, paddedCount: Int) {
-        guard modeStates[mode]?.preparedDrawCount != drawCount else { return }
+    private func updateUnsortedOrderIfNeeded(
+        mode: SortMode,
+        orderBuffer: MTLBuffer,
+        splatCount: Int,
+        drawCount: Int,
+        paddedCount: Int,
+        frameResource: inout FrameResources
+    ) {
+        guard frameResource.modeStates[mode]?.preparedDrawCount != drawCount else { return }
         writeUnsortedOrder(orderBuffer: orderBuffer, splatCount: splatCount, drawCount: drawCount, paddedCount: paddedCount)
-        modeStates[mode]?.preparedDrawCount = drawCount
+        frameResource.modeStates[mode]?.preparedDrawCount = drawCount
     }
 
     private func writeUnsortedOrder(orderBuffer: MTLBuffer, splatCount: Int, drawCount: Int, paddedCount: Int) {
         let pairsPointer = orderBuffer.contents().bindMemory(to: SortPair.self, capacity: paddedCount)
-        guard splatCount > 0, drawCount > 0 else { return }
-        let stride = Double(splatCount) / Double(drawCount)
-        for offset in 0..<drawCount {
-            let index = min(splatCount - 1, Int(Double(offset) * stride))
-            pairsPointer[offset] = SortPair(key: UInt32(splatCount - index), index: UInt32(index))
+        let writableCount = min(drawCount, paddedCount)
+        if splatCount > 0, writableCount > 0 {
+            let stride = Double(splatCount) / Double(writableCount)
+            for offset in 0..<writableCount {
+                let index = min(splatCount - 1, Int(Double(offset) * stride))
+                pairsPointer[offset] = SortPair(key: UInt32(splatCount - index), index: UInt32(index))
+            }
+        }
+        if writableCount < paddedCount {
+            for offset in writableCount..<paddedCount {
+                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
+            }
         }
     }
 
-    private func orderBuffer(for mode: SortMode, paddedCount: Int) throws -> MTLBuffer {
-        if activeMode != mode {
-            modeStates[mode] = nil
-            activeMode = mode
+    private func orderBuffer(for mode: SortMode, paddedCount: Int, frameResource: inout FrameResources) throws -> OrderAllocation {
+        if frameResource.activeMode != mode {
+            frameResource.modeStates.removeAll(keepingCapacity: true)
+            frameResource.activeMode = mode
         }
-        if let state = modeStates[mode], state.paddedCount >= paddedCount {
-            return state.orderBuffer
+        if let state = frameResource.modeStates[mode], state.paddedCount >= paddedCount {
+            return OrderAllocation(buffer: state.orderBuffer, capacity: state.paddedCount)
         }
         guard let buffer = device.makeBuffer(length: paddedCount * MemoryLayout<SortPair>.stride, options: .storageModeShared) else {
             throw SplatError.metalUnavailable
         }
-        buffer.label = "SplatRenderer.order.\(mode.rawValue)"
-        modeStates[mode] = ModeState(orderBuffer: buffer, paddedCount: paddedCount, preparedDrawCount: nil)
-        return buffer
+        buffer.label = "SplatRenderer.order.\(mode.rawValue).frame"
+        frameResource.modeStates[mode] = ModeState(orderBuffer: buffer, paddedCount: paddedCount, preparedDrawCount: nil)
+        return OrderAllocation(buffer: buffer, capacity: paddedCount)
+    }
+
+    private func makeSceneResources(packedSplats: [PackedSplat]) throws -> SceneResources {
+        let splatCount = packedSplats.count
+        let splatLength = max(1, splatCount) * MemoryLayout<PackedSplat>.stride
+        guard let splatBuffer = device.makeBuffer(length: splatLength, options: .storageModePrivate) else {
+            throw SplatError.metalUnavailable
+        }
+        splatBuffer.label = "SplatRenderer.scene.splats.private"
+
+        guard let stagingBuffer = device.makeBuffer(length: splatLength, options: .storageModeShared) else {
+            throw SplatError.metalUnavailable
+        }
+        stagingBuffer.label = "SplatRenderer.scene.splats.staging"
+        if !packedSplats.isEmpty {
+            packedSplats.withUnsafeBytes { bytes in
+                _ = memcpy(stagingBuffer.contents(), bytes.baseAddress, bytes.count)
+            }
+        }
+
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            throw SplatError.metalUnavailable
+        }
+        commandBuffer.label = "SplatRenderer.sceneUpload"
+        if let encoder = commandBuffer.makeBlitCommandEncoder() {
+            encoder.label = "SplatRenderer.uploadSplats"
+            encoder.copy(from: stagingBuffer, sourceOffset: 0, to: splatBuffer, destinationOffset: 0, size: splatLength)
+            encoder.endEncoding()
+        }
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+
+        return SceneResources(splatBuffer: splatBuffer, splatCount: splatCount, splatBufferLength: splatLength)
+    }
+
+    private func resetFrameResourceState() {
+        for index in frameResources.indices {
+            frameResources[index].modeStates.removeAll(keepingCapacity: false)
+            frameResources[index].activeMode = nil
+        }
+    }
+
+    private func waitForInflightResources() {
+        for _ in 0..<Self.maxInflightBuffers {
+            inflightSemaphore.wait()
+        }
+        for _ in 0..<Self.maxInflightBuffers {
+            inflightSemaphore.signal()
+        }
     }
 
     private func estimateMemoryBytes(mode: SortMode, drawCount: Int, sortPaddedCount: Int) -> UInt64 {
@@ -415,6 +505,23 @@ private struct ModeState {
     var orderBuffer: MTLBuffer
     var paddedCount: Int
     var preparedDrawCount: Int?
+}
+
+private struct OrderAllocation {
+    var buffer: MTLBuffer
+    var capacity: Int
+}
+
+private struct FrameResources {
+    var uniformBuffer: MTLBuffer
+    var modeStates: [SortMode: ModeState] = [:]
+    var activeMode: SortMode?
+}
+
+private struct SceneResources {
+    var splatBuffer: MTLBuffer
+    var splatCount: Int
+    var splatBufferLength: Int
 }
 
 private struct SortConstants {
