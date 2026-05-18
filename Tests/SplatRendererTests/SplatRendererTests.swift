@@ -92,8 +92,8 @@ struct PLYLoaderTests {
         }
     }
 
-    @Test("CPU sort orders far to near")
-    func cpuSortOrdersFarToNear() {
+    @Test("reference depth ordering sorts far to near")
+    func referenceDepthOrderSortsFarToNear() {
         let splats = [
             Splat(position: SIMD3<Float>(0, 0, -1), scale: .one, rotation: SIMD4<Float>(1, 0, 0, 0), opacity: 1, color: .one),
             Splat(position: SIMD3<Float>(0, 0, -3), scale: .one, rotation: SIMD4<Float>(1, 0, 0, 0), opacity: 1, color: .one)
@@ -119,7 +119,7 @@ struct PLYLoaderTests {
         let renderer = try SplatRenderer(device: device)
         try renderer.load(scene: scene)
         let camera = renderer.makeDefaultCamera(width: 64, height: 64)
-        let stats = try renderer.drawOffscreen(size: SIMD2<Int32>(64, 64), camera: camera, options: RenderOptions(sortMode: .cpu, waitForGPU: true))
+        let stats = try renderer.drawOffscreen(size: SIMD2<Int32>(64, 64), camera: camera, options: RenderOptions(sortMode: .radix, waitForGPU: true))
         #expect(stats.totalSplats == 1)
     }
 
@@ -146,7 +146,7 @@ struct PLYLoaderTests {
         let renderer = try SplatRenderer(device: device)
         try renderer.load(scene: SplatScene(splats: splats, diagnostics: diagnostics))
         let camera = renderer.makeDefaultCamera(width: 64, height: 64)
-        let modes: [SortMode] = [.unsorted, .tiled, .radix, .gpu, .bitonic, .cpu, .unsorted]
+        let modes: [SortMode] = [.unsorted, .radix, .gpu, .bitonic, .unsorted]
         for mode in modes {
             let stats = try renderer.drawOffscreen(size: SIMD2<Int32>(64, 64), camera: camera, options: RenderOptions(sortMode: mode, waitForGPU: true, maxVisibleSplats: 4))
             #expect(stats.sortMode == mode)

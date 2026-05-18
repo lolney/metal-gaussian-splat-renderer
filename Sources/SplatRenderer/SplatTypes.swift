@@ -23,20 +23,16 @@ public enum SplatError: Error, LocalizedError {
 
 public enum SortMode: String, CaseIterable, Sendable, Identifiable, Codable {
     case unsorted
-    case tiled
     case radix
     case bitonic
-    case cpu
     case gpu
 
     public var id: String { rawValue }
     public var displayName: String {
         switch self {
         case .unsorted: "UNSORTED"
-        case .tiled: "TILED"
         case .radix: "CPU RADIX"
         case .bitonic: "BITONIC"
-        case .cpu: "CPU"
         case .gpu: "GPU RADIX"
         }
     }

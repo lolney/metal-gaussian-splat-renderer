@@ -38,9 +38,9 @@ swift run splatbench \
   --warmup 4 \
   --width 640 \
   --height 360 \
-  --sort cpu \
+  --sort radix \
   --max-splats 100000 \
-  --output "$OUT_DIR/wild_cpu_100k.json"
+  --output "$OUT_DIR/wild_radix_100k.json"
 
 swift run splatbench \
   --input "$LARGE_SCENE" \

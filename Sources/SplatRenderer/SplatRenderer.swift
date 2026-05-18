@@ -212,12 +212,8 @@ public final class SplatRenderer {
             sortMilliseconds = milliseconds(since: sortStart)
         } else {
             let sortStart = CFAbsoluteTimeGetCurrent()
-            if plan.sortMode == .cpu {
-                updateCPUOrder(camera: camera, orderBuffer: orderBuffer, drawCount: plan.drawCount, paddedCount: orderCapacity)
-            } else if plan.sortMode == .radix {
+            if plan.sortMode == .radix {
                 updateRadixOrder(camera: camera, orderBuffer: orderBuffer, splatCount: plan.totalSplats, drawCount: plan.drawCount, paddedCount: orderCapacity)
-            } else if plan.sortMode == .tiled {
-                updateTiledOrder(camera: camera, orderBuffer: orderBuffer, splatCount: plan.totalSplats, drawCount: plan.drawCount, paddedCount: orderCapacity)
             } else {
                 updateUnsortedOrderIfNeeded(
                     mode: plan.sortMode,
@@ -505,20 +501,6 @@ public final class SplatRenderer {
         encoder?.endEncoding()
     }
 
-    private func updateCPUOrder(camera: Camera, orderBuffer: MTLBuffer, drawCount: Int, paddedCount: Int) {
-        let sorted = SplatScene.sortedIndices(for: cpuSortSplats, camera: camera)
-        let pairsPointer = orderBuffer.contents().bindMemory(to: SortPair.self, capacity: paddedCount)
-        let writableCount = min(drawCount, sorted.count, paddedCount)
-        for offset in 0..<paddedCount {
-            if offset < writableCount {
-                let index = sorted[offset]
-                pairsPointer[offset] = SortPair(key: UInt32(sorted.count - offset), index: index)
-            } else {
-                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
-            }
-        }
-    }
-
     private func updateRadixOrder(camera: Camera, orderBuffer: MTLBuffer, splatCount: Int, drawCount: Int, paddedCount: Int) {
         let pairsPointer = orderBuffer.contents().bindMemory(to: SortPair.self, capacity: paddedCount)
         let writableCount = min(drawCount, paddedCount)
@@ -563,73 +545,6 @@ public final class SplatRenderer {
 
         for offset in 0..<writableCount {
             pairsPointer[offset] = pairs[offset]
-        }
-        if writableCount < paddedCount {
-            for offset in writableCount..<paddedCount {
-                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
-            }
-        }
-    }
-
-    private func updateTiledOrder(camera: Camera, orderBuffer: MTLBuffer, splatCount: Int, drawCount: Int, paddedCount: Int) {
-        let pairsPointer = orderBuffer.contents().bindMemory(to: SortPair.self, capacity: paddedCount)
-        let writableCount = min(drawCount, paddedCount)
-        guard splatCount > 0, writableCount > 0 else {
-            for offset in 0..<paddedCount {
-                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
-            }
-            return
-        }
-
-        let tileSize = 32
-        let depthBucketCount = 16
-        let viewport = camera.viewportSize
-        let tilesX = max(1, Int(ceil(Double(viewport.x) / Double(tileSize))))
-        let tilesY = max(1, Int(ceil(Double(viewport.y) / Double(tileSize))))
-        let tileCount = tilesX * tilesY
-        let binCount = tileCount * depthBucketCount
-        let viewProjectionMatrix = camera.projectionMatrix * camera.viewMatrix
-        var counts = Array(repeating: 0, count: binCount)
-        var sources = Array(repeating: UInt32.max, count: writableCount)
-        var bins = Array(repeating: 0, count: writableCount)
-        var depths = Array(repeating: UInt32(0), count: writableCount)
-        let stride = Double(splatCount) / Double(writableCount)
-
-        for offset in 0..<writableCount {
-            let sourceIndex = min(splatCount - 1, Int(Double(offset) * stride))
-            sources[offset] = UInt32(sourceIndex)
-            let position = cpuSortSplats[sourceIndex].position
-            let world = SIMD4<Float>(position.x, position.y, position.z, 1)
-            let clip = viewProjectionMatrix * world
-            let view = camera.viewMatrix * world
-            let depth = max(-view.z, 0)
-            depths[offset] = min(UInt32(depth * 100_000), 0xffff_fffe)
-
-            let ndcX = clip.x / max(abs(clip.w), 0.0001)
-            let ndcY = clip.y / max(abs(clip.w), 0.0001)
-            let pixelX = min(max(Int((ndcX * 0.5 + 0.5) * viewport.x), 0), max(tilesX * tileSize - 1, 0))
-            let pixelY = min(max(Int((1 - (ndcY * 0.5 + 0.5)) * viewport.y), 0), max(tilesY * tileSize - 1, 0))
-            let tileX = min(max(pixelX / tileSize, 0), tilesX - 1)
-            let tileY = min(max(pixelY / tileSize, 0), tilesY - 1)
-            let tile = tileY * tilesX + tileX
-            let depthBucket = min(depthBucketCount - 1, Int(depth / max(sceneDiagnostics?.bounds.radius ?? 1, 0.001) * Float(depthBucketCount) / 6))
-            let bin = (depthBucketCount - 1 - depthBucket) * tileCount + tile
-            bins[offset] = bin
-            counts[bin] += 1
-        }
-
-        var offsets = Array(repeating: 0, count: binCount)
-        var cursor = 0
-        for bin in 0..<binCount {
-            offsets[bin] = cursor
-            cursor += counts[bin]
-        }
-        var writeOffsets = offsets
-        for offset in 0..<writableCount {
-            let bin = bins[offset]
-            let destination = writeOffsets[bin]
-            writeOffsets[bin] += 1
-            pairsPointer[destination] = SortPair(key: depths[offset], index: sources[offset])
         }
         if writableCount < paddedCount {
             for offset in writableCount..<paddedCount {

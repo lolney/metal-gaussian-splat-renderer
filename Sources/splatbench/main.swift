@@ -142,7 +142,7 @@ enum SplatBench {
 
     private static func printUsage() {
         print("""
-        Usage: splatbench --input scene.ply [--frames N] [--warmup N] [--width W] [--height H] [--sort unsorted|tiled|radix|gpu|bitonic|cpu] [--max-splats N] [--radius px] [--no-culling] [--projection-cache] [--output results.json] [--capture trace.gputrace]
+        Usage: splatbench --input scene.ply [--frames N] [--warmup N] [--width W] [--height H] [--sort unsorted|radix|gpu|bitonic] [--max-splats N] [--radius px] [--no-culling] [--projection-cache] [--output results.json] [--capture trace.gputrace]
         """)
     }
 

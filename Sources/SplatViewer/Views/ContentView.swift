@@ -44,7 +44,7 @@ struct ContentView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 360)
+                .frame(width: 300)
 
                 Toggle(isOn: Binding(
                     get: { store.options.useProjectionCache },

@@ -61,7 +61,7 @@ final class ViewerStore: ObservableObject {
         if loaded.count > interactiveGPUSortLimit, options.sortMode == .gpu {
             options.sortMode = .unsorted
             options.maxVisibleSplats = min(max(options.maxVisibleSplats, 500_000), loaded.count)
-            statusMessage = "Large scene loaded in unsorted mode with a 500k budget. GPU and CPU sort remain available, but they may be slow."
+            statusMessage = "Large scene loaded in unsorted mode with a 500k budget. GPU radix, CPU radix, and bitonic reference modes remain available, but they may be slow."
         } else {
             statusMessage = nil
         }
@@ -90,7 +90,7 @@ final class ViewerStore: ObservableObject {
     func selectSortMode(_ mode: SortMode) {
         options.sortMode = mode
         if let scene, scene.count > interactiveGPUSortLimit, mode != .unsorted {
-            statusMessage = "\(mode.displayName) sort requested for a large scene. The renderer will reinitialize that mode's order buffer and may stall while sorting."
+            statusMessage = "\(mode.displayName) requested for a large scene. The renderer will reinitialize that mode's order buffer and may stall while sorting."
         } else {
             statusMessage = nil
         }
