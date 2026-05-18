@@ -72,6 +72,7 @@ struct ProfilingPanel: View {
             HStack(spacing: 12) {
                 LegendItem(color: .blue, label: "Depth encode")
                 LegendItem(color: .orange, label: "Sort encode")
+                LegendItem(color: .purple, label: "Projection")
                 LegendItem(color: .green, label: "Draw encode")
             }
             .font(.caption2)
@@ -177,6 +178,7 @@ private struct MetricBars: View {
                 let segments: [(Double, Color)] = [
                     (frame.depthKeyMilliseconds ?? 0, .blue),
                     (frame.sortMilliseconds ?? 0, .orange),
+                    (frame.projectionMilliseconds ?? 0, .purple),
                     (frame.drawMilliseconds ?? 0, .green)
                 ]
                 for (value, color) in segments {
@@ -193,7 +195,7 @@ private struct MetricBars: View {
 
     static func scaleValue(frames: [FrameStats]) -> Double? {
         let totals = frames.map {
-            ($0.depthKeyMilliseconds ?? 0) + ($0.sortMilliseconds ?? 0) + ($0.drawMilliseconds ?? 0)
+            ($0.depthKeyMilliseconds ?? 0) + ($0.sortMilliseconds ?? 0) + ($0.projectionMilliseconds ?? 0) + ($0.drawMilliseconds ?? 0)
         }.filter { $0 > 0 }
         guard !totals.isEmpty else { return nil }
         let sorted = totals.sorted()
@@ -259,6 +261,7 @@ private struct ControlsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("Enable profiling", isOn: $store.options.enableProfiling)
             Toggle("Wait for GPU timings", isOn: $store.options.waitForGPU)
+            Toggle("Projection cache", isOn: $store.options.useProjectionCache)
             HStack {
                 Text("Budget")
                 Stepper(value: Binding(

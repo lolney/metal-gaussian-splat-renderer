@@ -32,6 +32,13 @@ struct SortConstants {
     uint sourceCount;
 };
 
+struct ProjectedSplat {
+    float4 clipCenter;
+    float4 axis0Opacity;
+    float4 axis1;
+    float4 color;
+};
+
 struct VertexOut {
     float4 position [[position]];
     float2 local;
@@ -60,6 +67,46 @@ static float3x3 quatToMatrix(float4 q) {
     );
 }
 
+static float2 projectNDC(constant CameraUniforms &camera, float3 position) {
+    float4 clip = camera.viewProjectionMatrix * float4(position, 1.0);
+    return clip.xy / max(abs(clip.w), 0.0001);
+}
+
+static void covarianceEllipse(
+    constant CameraUniforms &camera,
+    PackedSplat splat,
+    thread float2 &axis0,
+    thread float2 &axis1
+) {
+    float3 position = splat.positionAndOpacity.xyz;
+    float3 scale = max(splat.scaleAndFlags.xyz, float3(0.0001));
+    float3x3 rotation = quatToMatrix(splat.rotation);
+    float2 viewport = max(camera.viewportAndRadius.xy, float2(1.0));
+    float2 center = projectNDC(camera, position);
+
+    float3 worldAxis0 = rotation[0] * scale.x;
+    float3 worldAxis1 = rotation[1] * scale.y;
+    float3 worldAxis2 = rotation[2] * scale.z;
+    float2 p0 = (projectNDC(camera, position + worldAxis0) - center) * viewport * 0.5;
+    float2 p1 = (projectNDC(camera, position + worldAxis1) - center) * viewport * 0.5;
+    float2 p2 = (projectNDC(camera, position + worldAxis2) - center) * viewport * 0.5;
+
+    float a = dot(float3(p0.x, p1.x, p2.x), float3(p0.x, p1.x, p2.x));
+    float b = dot(float3(p0.x, p1.x, p2.x), float3(p0.y, p1.y, p2.y));
+    float d = dot(float3(p0.y, p1.y, p2.y), float3(p0.y, p1.y, p2.y));
+    float trace = a + d;
+    float delta = sqrt(max((a - d) * (a - d) * 0.25 + b * b, 0.0));
+    float lambda0 = max(trace * 0.5 + delta, 1.0);
+    float lambda1 = max(trace * 0.5 - delta, 1.0);
+    float2 major = normalize(abs(b) > 0.00001 ? float2(lambda0 - d, b) : (a >= d ? float2(1.0, 0.0) : float2(0.0, 1.0)));
+    float2 minor = float2(-major.y, major.x);
+
+    float2 radii = sqrt(float2(lambda0, lambda1)) * 3.0;
+    radii = clamp(radii, float2(1.0), float2(camera.viewportAndRadius.z));
+    axis0 = major * radii.x / viewport * 2.0;
+    axis1 = minor * radii.y / viewport * 2.0;
+}
+
 kernel void depthKeyKernel(
     device const PackedSplat *splats [[buffer(0)]],
     device SortPair *pairs [[buffer(1)]],
@@ -83,6 +130,58 @@ kernel void depthKeyKernel(
     float depth = max(-view.z, 0.0);
     uint key = min((uint)(depth * 100000.0), 0xfffffffeu);
     pairs[gid] = SortPair{key, splatIndex};
+}
+
+kernel void projectSplatsKernel(
+    device const PackedSplat *splats [[buffer(0)]],
+    device const SortPair *pairs [[buffer(1)]],
+    device ProjectedSplat *projected [[buffer(2)]],
+    constant CameraUniforms &camera [[buffer(3)]],
+    constant SortConstants &constants [[buffer(4)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= constants.count) {
+        return;
+    }
+
+    uint splatIndex = pairs[gid].index;
+    if (splatIndex == 0xffffffffu) {
+        projected[gid].clipCenter = float4(2.0, 2.0, 0.0, 1.0);
+        projected[gid].axis0Opacity = float4(0.0);
+        projected[gid].axis1 = float4(0.0);
+        projected[gid].color = float4(0.0);
+        return;
+    }
+
+    PackedSplat splat = splats[splatIndex];
+    float3 position = splat.positionAndOpacity.xyz;
+    float4 viewCenter = camera.viewMatrix * float4(position, 1.0);
+    float4 clipCenter = camera.projectionMatrix * viewCenter;
+    bool culled = false;
+    if (camera.viewportAndRadius.w > 0.5) {
+        float margin = 1.25;
+        culled = clipCenter.w <= 0.001 ||
+            clipCenter.x < -clipCenter.w * margin ||
+            clipCenter.x > clipCenter.w * margin ||
+            clipCenter.y < -clipCenter.w * margin ||
+            clipCenter.y > clipCenter.w * margin;
+    }
+
+    if (culled) {
+        projected[gid].clipCenter = float4(2.0, 2.0, 0.0, 1.0);
+        projected[gid].axis0Opacity = float4(0.0);
+        projected[gid].axis1 = float4(0.0);
+        projected[gid].color = float4(0.0);
+        return;
+    }
+
+    float2 axis0;
+    float2 axis1;
+    covarianceEllipse(camera, splat, axis0, axis1);
+    projected[gid].clipCenter = clipCenter;
+    projected[gid].axis0Opacity = float4(axis0, splat.positionAndOpacity.w, 0.0);
+    projected[gid].axis1 = float4(axis1, 0.0, 0.0);
+    projected[gid].color = splat.color;
 }
 
 kernel void bitonicSortKernel(
@@ -112,6 +211,31 @@ kernel void bitonicSortKernel(
         pairs[i] = b;
         pairs[ixj] = a;
     }
+}
+
+vertex VertexOut projectedSplatVertex(
+    uint vertexID [[vertex_id]],
+    uint instanceID [[instance_id]],
+    device const ProjectedSplat *projected [[buffer(0)]]
+) {
+    constexpr float2 corners[6] = {
+        float2(-1.0, -1.0),
+        float2( 1.0, -1.0),
+        float2(-1.0,  1.0),
+        float2( 1.0, -1.0),
+        float2( 1.0,  1.0),
+        float2(-1.0,  1.0)
+    };
+
+    ProjectedSplat splat = projected[instanceID];
+    float2 corner = corners[vertexID];
+    float2 ndcOffset = splat.axis0Opacity.xy * corner.x + splat.axis1.xy * corner.y;
+    VertexOut out;
+    out.position = splat.clipCenter + float4(ndcOffset * splat.clipCenter.w, 0.0, 0.0);
+    out.local = corner * 3.0;
+    out.color = splat.color;
+    out.opacity = splat.axis0Opacity.z;
+    return out;
 }
 
 vertex VertexOut splatVertex(

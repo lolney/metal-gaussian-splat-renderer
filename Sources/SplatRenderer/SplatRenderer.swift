@@ -11,8 +11,10 @@ public final class SplatRenderer {
     public let commandQueue: MTLCommandQueue
 
     private let renderPipeline: MTLRenderPipelineState
+    private let projectedRenderPipeline: MTLRenderPipelineState
     private let depthKeyPipeline: MTLComputePipelineState
     private let sortPipeline: MTLComputePipelineState
+    private let projectionPipeline: MTLComputePipelineState
     private var sceneResources: SceneResources?
     private var cpuSortSplats: [Splat] = []
     private var frameResources: [FrameResources] = []
@@ -41,7 +43,9 @@ public final class SplatRenderer {
 
         guard
             let vertex = library.makeFunction(name: "splatVertex"),
+            let projectedVertex = library.makeFunction(name: "projectedSplatVertex"),
             let fragment = library.makeFunction(name: "splatFragment"),
+            let project = library.makeFunction(name: "projectSplatsKernel"),
             let depth = library.makeFunction(name: "depthKeyKernel"),
             let sort = library.makeFunction(name: "bitonicSortKernel")
         else {
@@ -61,8 +65,24 @@ public final class SplatRenderer {
         renderDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
         renderDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
         renderPipeline = try device.makeRenderPipelineState(descriptor: renderDescriptor)
+
+        let projectedDescriptor = MTLRenderPipelineDescriptor()
+        projectedDescriptor.label = "SplatRenderer.projectedRenderPipeline"
+        projectedDescriptor.vertexFunction = projectedVertex
+        projectedDescriptor.fragmentFunction = fragment
+        projectedDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        projectedDescriptor.colorAttachments[0].isBlendingEnabled = true
+        projectedDescriptor.colorAttachments[0].rgbBlendOperation = .add
+        projectedDescriptor.colorAttachments[0].alphaBlendOperation = .add
+        projectedDescriptor.colorAttachments[0].sourceRGBBlendFactor = .one
+        projectedDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+        projectedDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        projectedDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        projectedRenderPipeline = try device.makeRenderPipelineState(descriptor: projectedDescriptor)
+
         depthKeyPipeline = try device.makeComputePipelineState(function: depth)
         sortPipeline = try device.makeComputePipelineState(function: sort)
+        projectionPipeline = try device.makeComputePipelineState(function: project)
 
         var resources: [FrameResources] = []
         for index in 0..<Self.maxInflightBuffers {
@@ -115,16 +135,7 @@ public final class SplatRenderer {
             semaphore.signal()
         }
 
-        let splatCount = sceneResources?.splatCount ?? 0
-        let requestedDrawCount = options.maxVisibleSplats > 0 ? min(options.maxVisibleSplats, splatCount) : splatCount
-        let drawCount = max(0, requestedDrawCount)
-        let sortPaddedCount = max(1, nextPowerOfTwo(max(drawCount, 1)))
-        let selectedSortMode: SortMode
-        if splatCount == 0 {
-            selectedSortMode = .unsorted
-        } else {
-            selectedSortMode = options.sortMode
-        }
+        let plan = makeFramePlan(sceneSplatCount: sceneResources?.splatCount ?? 0, options: options)
 
         guard let sceneResources else {
             clearOnly(commandBuffer: commandBuffer, descriptor: renderPassDescriptor, drawable: drawable)
@@ -140,7 +151,7 @@ public final class SplatRenderer {
                 totalFrameMilliseconds: milliseconds(since: totalStart),
                 visibleSplats: 0,
                 totalSplats: 0,
-                sortMode: selectedSortMode,
+                sortMode: plan.sortMode,
                 estimatedMemoryBytes: 0,
                 estimatedMemoryBandwidthGBps: nil
             )
@@ -150,10 +161,13 @@ public final class SplatRenderer {
         let resourceIndex = frameIndex % max(1, frameResources.count)
         frameIndex += 1
         var frameResource = frameResources[resourceIndex]
-        let requestedOrderCapacity = selectedSortMode == .gpu ? sortPaddedCount : max(drawCount, 1)
-        let orderAllocation = try orderBuffer(for: selectedSortMode, paddedCount: requestedOrderCapacity, frameResource: &frameResource)
+        let requestedOrderCapacity = plan.sortMode == .gpu ? plan.sortPaddedCount : max(plan.drawCount, 1)
+        let orderAllocation = try orderBuffer(for: plan.sortMode, paddedCount: requestedOrderCapacity, frameResource: &frameResource)
         let orderBuffer = orderAllocation.buffer
         let orderCapacity = orderAllocation.capacity
+        let projectionBuffer = try options.useProjectionCache
+            ? projectedBuffer(drawCount: max(plan.drawCount, 1), frameResource: &frameResource)
+            : nil
 
         let uniformBuffer = frameResource.uniformBuffer
         var uniforms = CameraUniforms(camera: camera, maxSplatRadius: options.maxSplatRadius, enableCulling: options.enableCulling)
@@ -161,32 +175,36 @@ public final class SplatRenderer {
 
         var depthKeyMilliseconds: Double?
         var sortMilliseconds: Double?
-        if selectedSortMode == .gpu {
+        if plan.sortMode == .gpu {
             let depthStart = CFAbsoluteTimeGetCurrent()
             encodeDepthKeys(
                 commandBuffer: commandBuffer,
                 splatBuffer: splatBuffer,
                 orderBuffer: orderBuffer,
                 uniformBuffer: uniformBuffer,
-                count: drawCount,
-                paddedCount: sortPaddedCount,
-                sourceCount: splatCount
+                count: plan.drawCount,
+                paddedCount: plan.sortPaddedCount,
+                sourceCount: plan.totalSplats
             )
             depthKeyMilliseconds = milliseconds(since: depthStart)
 
             let sortStart = CFAbsoluteTimeGetCurrent()
-            encodeBitonicSort(commandBuffer: commandBuffer, orderBuffer: orderBuffer, count: drawCount, paddedCount: sortPaddedCount, sourceCount: splatCount)
+            encodeBitonicSort(commandBuffer: commandBuffer, orderBuffer: orderBuffer, count: plan.drawCount, paddedCount: plan.sortPaddedCount, sourceCount: plan.totalSplats)
             sortMilliseconds = milliseconds(since: sortStart)
         } else {
             let sortStart = CFAbsoluteTimeGetCurrent()
-            if selectedSortMode == .cpu {
-                updateCPUOrder(camera: camera, orderBuffer: orderBuffer, drawCount: drawCount, paddedCount: orderCapacity)
+            if plan.sortMode == .cpu {
+                updateCPUOrder(camera: camera, orderBuffer: orderBuffer, drawCount: plan.drawCount, paddedCount: orderCapacity)
+            } else if plan.sortMode == .radix {
+                updateRadixOrder(camera: camera, orderBuffer: orderBuffer, splatCount: plan.totalSplats, drawCount: plan.drawCount, paddedCount: orderCapacity)
+            } else if plan.sortMode == .tiled {
+                updateTiledOrder(camera: camera, orderBuffer: orderBuffer, splatCount: plan.totalSplats, drawCount: plan.drawCount, paddedCount: orderCapacity)
             } else {
                 updateUnsortedOrderIfNeeded(
-                    mode: selectedSortMode,
+                    mode: plan.sortMode,
                     orderBuffer: orderBuffer,
-                    splatCount: splatCount,
-                    drawCount: drawCount,
+                    splatCount: plan.totalSplats,
+                    drawCount: plan.drawCount,
                     paddedCount: orderCapacity,
                     frameResource: &frameResource
                 )
@@ -195,16 +213,32 @@ public final class SplatRenderer {
         }
         frameResources[resourceIndex] = frameResource
 
+        var projectionMilliseconds: Double?
+        if let projectionBuffer {
+            let projectionStart = CFAbsoluteTimeGetCurrent()
+            encodeProjection(
+                commandBuffer: commandBuffer,
+                splatBuffer: splatBuffer,
+                orderBuffer: orderBuffer,
+                projectedBuffer: projectionBuffer,
+                uniformBuffer: uniformBuffer,
+                count: plan.drawCount,
+                sourceCount: plan.totalSplats
+            )
+            projectionMilliseconds = milliseconds(since: projectionStart)
+        }
+
         let drawStart = CFAbsoluteTimeGetCurrent()
-        let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor)
-        encoder?.label = "SplatRenderer.drawSplats"
-        encoder?.setRenderPipelineState(renderPipeline)
-        encoder?.setViewport(MTLViewport(originX: 0, originY: 0, width: Double(viewportSize.x), height: Double(viewportSize.y), znear: 0, zfar: 1))
-        encoder?.setVertexBuffer(splatBuffer, offset: 0, index: 0)
-        encoder?.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
-        encoder?.setVertexBuffer(orderBuffer, offset: 0, index: 2)
-        encoder?.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: drawCount)
-        encoder?.endEncoding()
+        encodeRaster(
+            commandBuffer: commandBuffer,
+            renderPassDescriptor: renderPassDescriptor,
+            viewportSize: viewportSize,
+            splatBuffer: splatBuffer,
+            uniformBuffer: uniformBuffer,
+            orderBuffer: orderBuffer,
+            projectionBuffer: projectionBuffer,
+            drawCount: plan.drawCount
+        )
         let drawMilliseconds = milliseconds(since: drawStart)
 
         let presentStart = CFAbsoluteTimeGetCurrent()
@@ -225,7 +259,7 @@ public final class SplatRenderer {
         } else {
             gpuMilliseconds = nil
         }
-        let estimatedMemoryBytes = estimateMemoryBytes(mode: selectedSortMode, drawCount: drawCount, sortPaddedCount: sortPaddedCount)
+        let estimatedMemoryBytes = estimateMemoryBytes(mode: plan.sortMode, drawCount: plan.drawCount, sortPaddedCount: plan.sortPaddedCount, usesProjectionCache: projectionBuffer != nil)
         let estimatedBandwidthGBps: Double?
         if let gpuMilliseconds, gpuMilliseconds > 0 {
             estimatedBandwidthGBps = Double(estimatedMemoryBytes) / (gpuMilliseconds / 1000) / 1_000_000_000
@@ -239,12 +273,13 @@ public final class SplatRenderer {
             gpuFrameMilliseconds: gpuMilliseconds,
             depthKeyMilliseconds: depthKeyMilliseconds,
             sortMilliseconds: sortMilliseconds,
+            projectionMilliseconds: projectionMilliseconds,
             drawMilliseconds: drawMilliseconds,
             presentMilliseconds: presentMilliseconds,
             totalFrameMilliseconds: milliseconds(since: totalStart),
-            visibleSplats: drawCount,
-            totalSplats: splatCount,
-            sortMode: selectedSortMode,
+            visibleSplats: plan.drawCount,
+            totalSplats: plan.totalSplats,
+            sortMode: plan.sortMode,
             estimatedMemoryBytes: estimatedMemoryBytes,
             estimatedMemoryBandwidthGBps: estimatedBandwidthGBps
         )
@@ -283,6 +318,14 @@ public final class SplatRenderer {
             commandBuffer.present(drawable)
         }
         commandBuffer.commit()
+    }
+
+    private func makeFramePlan(sceneSplatCount: Int, options: RenderOptions) -> FramePlan {
+        let requestedDrawCount = options.maxVisibleSplats > 0 ? min(options.maxVisibleSplats, sceneSplatCount) : sceneSplatCount
+        let drawCount = max(0, requestedDrawCount)
+        let sortPaddedCount = max(1, nextPowerOfTwo(max(drawCount, 1)))
+        let sortMode: SortMode = sceneSplatCount == 0 ? .unsorted : options.sortMode
+        return FramePlan(sortMode: sortMode, drawCount: drawCount, totalSplats: sceneSplatCount, sortPaddedCount: sortPaddedCount)
     }
 
     private func encodeDepthKeys(
@@ -325,6 +368,54 @@ public final class SplatRenderer {
         }
     }
 
+    private func encodeProjection(
+        commandBuffer: MTLCommandBuffer,
+        splatBuffer: MTLBuffer,
+        orderBuffer: MTLBuffer,
+        projectedBuffer: MTLBuffer,
+        uniformBuffer: MTLBuffer,
+        count: Int,
+        sourceCount: Int
+    ) {
+        guard count > 0, let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        encoder.label = "SplatRenderer.projectSplats"
+        encoder.setComputePipelineState(projectionPipeline)
+        encoder.setBuffer(splatBuffer, offset: 0, index: 0)
+        encoder.setBuffer(orderBuffer, offset: 0, index: 1)
+        encoder.setBuffer(projectedBuffer, offset: 0, index: 2)
+        encoder.setBuffer(uniformBuffer, offset: 0, index: 3)
+        var constants = SortConstants(count: UInt32(count), paddedCount: UInt32(count), j: 0, k: 0, sourceCount: UInt32(sourceCount))
+        encoder.setBytes(&constants, length: MemoryLayout<SortConstants>.stride, index: 4)
+        dispatch(encoder: encoder, pipeline: projectionPipeline, count: count)
+        encoder.endEncoding()
+    }
+
+    private func encodeRaster(
+        commandBuffer: MTLCommandBuffer,
+        renderPassDescriptor: MTLRenderPassDescriptor,
+        viewportSize: SIMD2<Int32>,
+        splatBuffer: MTLBuffer,
+        uniformBuffer: MTLBuffer,
+        orderBuffer: MTLBuffer,
+        projectionBuffer: MTLBuffer?,
+        drawCount: Int
+    ) {
+        let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor)
+        encoder?.label = "SplatRenderer.rasterComposite"
+        encoder?.setViewport(MTLViewport(originX: 0, originY: 0, width: Double(viewportSize.x), height: Double(viewportSize.y), znear: 0, zfar: 1))
+        if let projectionBuffer {
+            encoder?.setRenderPipelineState(projectedRenderPipeline)
+            encoder?.setVertexBuffer(projectionBuffer, offset: 0, index: 0)
+        } else {
+            encoder?.setRenderPipelineState(renderPipeline)
+            encoder?.setVertexBuffer(splatBuffer, offset: 0, index: 0)
+            encoder?.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
+            encoder?.setVertexBuffer(orderBuffer, offset: 0, index: 2)
+        }
+        encoder?.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: drawCount)
+        encoder?.endEncoding()
+    }
+
     private func updateCPUOrder(camera: Camera, orderBuffer: MTLBuffer, drawCount: Int, paddedCount: Int) {
         let sorted = SplatScene.sortedIndices(for: cpuSortSplats, camera: camera)
         let pairsPointer = orderBuffer.contents().bindMemory(to: SortPair.self, capacity: paddedCount)
@@ -334,6 +425,125 @@ public final class SplatRenderer {
                 let index = sorted[offset]
                 pairsPointer[offset] = SortPair(key: UInt32(sorted.count - offset), index: index)
             } else {
+                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
+            }
+        }
+    }
+
+    private func updateRadixOrder(camera: Camera, orderBuffer: MTLBuffer, splatCount: Int, drawCount: Int, paddedCount: Int) {
+        let pairsPointer = orderBuffer.contents().bindMemory(to: SortPair.self, capacity: paddedCount)
+        let writableCount = min(drawCount, paddedCount)
+        guard splatCount > 0, writableCount > 0 else {
+            for offset in 0..<paddedCount {
+                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
+            }
+            return
+        }
+
+        var pairs = Array(repeating: SortPair(key: 0, index: 0), count: writableCount)
+        var scratch = pairs
+        let sampleStride = Double(splatCount) / Double(writableCount)
+        for offset in 0..<writableCount {
+            let sourceIndex = min(splatCount - 1, Int(Double(offset) * sampleStride))
+            let position = cpuSortSplats[sourceIndex].position
+            let world = SIMD4<Float>(position.x, position.y, position.z, 1)
+            let view = camera.viewMatrix * world
+            let depth = max(-view.z, 0)
+            pairs[offset] = SortPair(key: min(UInt32(depth * 100_000), 0xffff_fffe), index: UInt32(sourceIndex))
+        }
+
+        for shift in stride(from: 0, to: 32, by: 8) {
+            var counts = Array(repeating: 0, count: 256)
+            for pair in pairs {
+                counts[Int((pair.key >> UInt32(shift)) & 0xff)] += 1
+            }
+            var offsets = Array(repeating: 0, count: 256)
+            var cursor = 0
+            for bucket in stride(from: 255, through: 0, by: -1) {
+                offsets[bucket] = cursor
+                cursor += counts[bucket]
+            }
+            var writeOffsets = offsets
+            for pair in pairs {
+                let bucket = Int((pair.key >> UInt32(shift)) & 0xff)
+                scratch[writeOffsets[bucket]] = pair
+                writeOffsets[bucket] += 1
+            }
+            swap(&pairs, &scratch)
+        }
+
+        for offset in 0..<writableCount {
+            pairsPointer[offset] = pairs[offset]
+        }
+        if writableCount < paddedCount {
+            for offset in writableCount..<paddedCount {
+                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
+            }
+        }
+    }
+
+    private func updateTiledOrder(camera: Camera, orderBuffer: MTLBuffer, splatCount: Int, drawCount: Int, paddedCount: Int) {
+        let pairsPointer = orderBuffer.contents().bindMemory(to: SortPair.self, capacity: paddedCount)
+        let writableCount = min(drawCount, paddedCount)
+        guard splatCount > 0, writableCount > 0 else {
+            for offset in 0..<paddedCount {
+                pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
+            }
+            return
+        }
+
+        let tileSize = 32
+        let depthBucketCount = 16
+        let viewport = camera.viewportSize
+        let tilesX = max(1, Int(ceil(Double(viewport.x) / Double(tileSize))))
+        let tilesY = max(1, Int(ceil(Double(viewport.y) / Double(tileSize))))
+        let tileCount = tilesX * tilesY
+        let binCount = tileCount * depthBucketCount
+        let viewProjectionMatrix = camera.projectionMatrix * camera.viewMatrix
+        var counts = Array(repeating: 0, count: binCount)
+        var sources = Array(repeating: UInt32.max, count: writableCount)
+        var bins = Array(repeating: 0, count: writableCount)
+        var depths = Array(repeating: UInt32(0), count: writableCount)
+        let stride = Double(splatCount) / Double(writableCount)
+
+        for offset in 0..<writableCount {
+            let sourceIndex = min(splatCount - 1, Int(Double(offset) * stride))
+            sources[offset] = UInt32(sourceIndex)
+            let position = cpuSortSplats[sourceIndex].position
+            let world = SIMD4<Float>(position.x, position.y, position.z, 1)
+            let clip = viewProjectionMatrix * world
+            let view = camera.viewMatrix * world
+            let depth = max(-view.z, 0)
+            depths[offset] = min(UInt32(depth * 100_000), 0xffff_fffe)
+
+            let ndcX = clip.x / max(abs(clip.w), 0.0001)
+            let ndcY = clip.y / max(abs(clip.w), 0.0001)
+            let pixelX = min(max(Int((ndcX * 0.5 + 0.5) * viewport.x), 0), max(tilesX * tileSize - 1, 0))
+            let pixelY = min(max(Int((1 - (ndcY * 0.5 + 0.5)) * viewport.y), 0), max(tilesY * tileSize - 1, 0))
+            let tileX = min(max(pixelX / tileSize, 0), tilesX - 1)
+            let tileY = min(max(pixelY / tileSize, 0), tilesY - 1)
+            let tile = tileY * tilesX + tileX
+            let depthBucket = min(depthBucketCount - 1, Int(depth / max(sceneDiagnostics?.bounds.radius ?? 1, 0.001) * Float(depthBucketCount) / 6))
+            let bin = (depthBucketCount - 1 - depthBucket) * tileCount + tile
+            bins[offset] = bin
+            counts[bin] += 1
+        }
+
+        var offsets = Array(repeating: 0, count: binCount)
+        var cursor = 0
+        for bin in 0..<binCount {
+            offsets[bin] = cursor
+            cursor += counts[bin]
+        }
+        var writeOffsets = offsets
+        for offset in 0..<writableCount {
+            let bin = bins[offset]
+            let destination = writeOffsets[bin]
+            writeOffsets[bin] += 1
+            pairsPointer[destination] = SortPair(key: depths[offset], index: sources[offset])
+        }
+        if writableCount < paddedCount {
+            for offset in writableCount..<paddedCount {
                 pairsPointer[offset] = SortPair(key: 0, index: UInt32.max)
             }
         }
@@ -385,6 +595,20 @@ public final class SplatRenderer {
         return OrderAllocation(buffer: buffer, capacity: paddedCount)
     }
 
+    private func projectedBuffer(drawCount: Int, frameResource: inout FrameResources) throws -> MTLBuffer {
+        let length = drawCount * MemoryLayout<ProjectedSplat>.stride
+        if let buffer = frameResource.projectedBuffer, frameResource.projectedCapacity >= drawCount {
+            return buffer
+        }
+        guard let buffer = device.makeBuffer(length: length, options: .storageModePrivate) else {
+            throw SplatError.metalUnavailable
+        }
+        buffer.label = "SplatRenderer.projectedSplats.frame"
+        frameResource.projectedBuffer = buffer
+        frameResource.projectedCapacity = drawCount
+        return buffer
+    }
+
     private func makeSceneResources(packedSplats: [PackedSplat]) throws -> SceneResources {
         let splatCount = packedSplats.count
         let splatLength = max(1, splatCount) * MemoryLayout<PackedSplat>.stride
@@ -422,6 +646,8 @@ public final class SplatRenderer {
         for index in frameResources.indices {
             frameResources[index].modeStates.removeAll(keepingCapacity: false)
             frameResources[index].activeMode = nil
+            frameResources[index].projectedBuffer = nil
+            frameResources[index].projectedCapacity = 0
         }
     }
 
@@ -434,12 +660,21 @@ public final class SplatRenderer {
         }
     }
 
-    private func estimateMemoryBytes(mode: SortMode, drawCount: Int, sortPaddedCount: Int) -> UInt64 {
+    private func estimateMemoryBytes(mode: SortMode, drawCount: Int, sortPaddedCount: Int, usesProjectionCache: Bool) -> UInt64 {
         let splatStride = UInt64(MemoryLayout<PackedSplat>.stride)
         let pairStride = UInt64(MemoryLayout<SortPair>.stride)
-        let vertexShaderReads = UInt64(drawCount) * 6 * (splatStride + pairStride)
+        let projectedStride = UInt64(MemoryLayout<ProjectedSplat>.stride)
+        let vertexShaderReads: UInt64
+        if usesProjectionCache {
+            vertexShaderReads = UInt64(drawCount) * 6 * projectedStride
+        } else {
+            vertexShaderReads = UInt64(drawCount) * 6 * (splatStride + pairStride)
+        }
         let colorWrites = UInt64(drawCount) * 6 * 4
         var total = vertexShaderReads + colorWrites
+        if usesProjectionCache {
+            total += UInt64(drawCount) * (splatStride + pairStride + projectedStride)
+        }
         if mode == .gpu {
             let sortCount = UInt64(sortPaddedCount)
             let depthKeyBytes = sortCount * (splatStride + pairStride)
@@ -507,6 +742,13 @@ private struct ModeState {
     var preparedDrawCount: Int?
 }
 
+private struct FramePlan {
+    var sortMode: SortMode
+    var drawCount: Int
+    var totalSplats: Int
+    var sortPaddedCount: Int
+}
+
 private struct OrderAllocation {
     var buffer: MTLBuffer
     var capacity: Int
@@ -516,6 +758,8 @@ private struct FrameResources {
     var uniformBuffer: MTLBuffer
     var modeStates: [SortMode: ModeState] = [:]
     var activeMode: SortMode?
+    var projectedBuffer: MTLBuffer?
+    var projectedCapacity: Int = 0
 }
 
 private struct SceneResources {
@@ -530,4 +774,11 @@ private struct SortConstants {
     var j: UInt32
     var k: UInt32
     var sourceCount: UInt32
+}
+
+private struct ProjectedSplat {
+    var clipCenter: SIMD4<Float>
+    var axis0Opacity: SIMD4<Float>
+    var axis1: SIMD4<Float>
+    var color: SIMD4<Float>
 }

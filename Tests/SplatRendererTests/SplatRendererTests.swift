@@ -146,7 +146,7 @@ struct PLYLoaderTests {
         let renderer = try SplatRenderer(device: device)
         try renderer.load(scene: SplatScene(splats: splats, diagnostics: diagnostics))
         let camera = renderer.makeDefaultCamera(width: 64, height: 64)
-        let modes: [SortMode] = [.unsorted, .gpu, .cpu, .unsorted]
+        let modes: [SortMode] = [.unsorted, .tiled, .radix, .gpu, .cpu, .unsorted]
         for mode in modes {
             let stats = try renderer.drawOffscreen(size: SIMD2<Int32>(64, 64), camera: camera, options: RenderOptions(sortMode: mode, waitForGPU: true, maxVisibleSplats: 4))
             #expect(stats.sortMode == mode)

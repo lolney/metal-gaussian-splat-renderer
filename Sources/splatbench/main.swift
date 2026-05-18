@@ -13,6 +13,7 @@ struct BenchOptions {
     var maxVisibleSplats = 0
     var maxSplatRadius: Float = 72
     var enableCulling = true
+    var useProjectionCache = false
     var output: URL?
     var capture: URL?
 }
@@ -54,7 +55,8 @@ enum SplatBench {
             enableProfiling: true,
             waitForGPU: true,
             enableCulling: options.enableCulling,
-            maxVisibleSplats: options.maxVisibleSplats
+            maxVisibleSplats: options.maxVisibleSplats,
+            useProjectionCache: options.useProjectionCache
         )
         let size = SIMD2<Int32>(Int32(options.width), Int32(options.height))
         for frame in 0..<options.frames {
@@ -117,6 +119,8 @@ enum SplatBench {
                 options.maxSplatRadius = Float(try next()) ?? options.maxSplatRadius
             case "--no-culling":
                 options.enableCulling = false
+            case "--projection-cache":
+                options.useProjectionCache = true
             case "--output":
                 options.output = URL(fileURLWithPath: try next())
             case "--capture":
@@ -138,7 +142,7 @@ enum SplatBench {
 
     private static func printUsage() {
         print("""
-        Usage: splatbench --input scene.ply [--frames N] [--warmup N] [--width W] [--height H] [--sort unsorted|gpu|cpu] [--max-splats N] [--radius px] [--no-culling] [--output results.json] [--capture trace.gputrace]
+        Usage: splatbench --input scene.ply [--frames N] [--warmup N] [--width W] [--height H] [--sort unsorted|tiled|radix|gpu|cpu] [--max-splats N] [--radius px] [--no-culling] [--projection-cache] [--output results.json] [--capture trace.gputrace]
         """)
     }
 
@@ -165,7 +169,7 @@ enum SplatBench {
     }
 
     private static func csv(frames: [FrameStats]) -> String {
-        var rows = ["id,total_ms,cpu_encode_ms,gpu_ms,depth_key_ms,sort_ms,draw_ms,estimated_memory_bytes,estimated_bandwidth_gbps,visible_splats,total_splats,sort_mode"]
+        var rows = ["id,total_ms,cpu_encode_ms,gpu_ms,depth_key_ms,sort_ms,projection_ms,draw_ms,estimated_memory_bytes,estimated_bandwidth_gbps,visible_splats,total_splats,sort_mode"]
         rows += frames.map { frame in
             [
                 "\(frame.id)",
@@ -174,6 +178,7 @@ enum SplatBench {
                 "\(frame.gpuFrameMilliseconds ?? 0)",
                 "\(frame.depthKeyMilliseconds ?? 0)",
                 "\(frame.sortMilliseconds ?? 0)",
+                "\(frame.projectionMilliseconds ?? 0)",
                 "\(frame.drawMilliseconds ?? 0)",
                 "\(frame.estimatedMemoryBytes)",
                 "\(frame.estimatedMemoryBandwidthGBps ?? 0)",

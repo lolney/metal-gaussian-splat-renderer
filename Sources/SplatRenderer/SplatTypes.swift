@@ -23,6 +23,8 @@ public enum SplatError: Error, LocalizedError {
 
 public enum SortMode: String, CaseIterable, Sendable, Identifiable, Codable {
     case unsorted
+    case tiled
+    case radix
     case cpu
     case gpu
 
@@ -30,6 +32,8 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable, Codable {
     public var displayName: String {
         switch self {
         case .unsorted: "UNSORTED"
+        case .tiled: "TILED"
+        case .radix: "RADIX"
         case .cpu: "CPU"
         case .gpu: "GPU"
         }
@@ -62,6 +66,7 @@ public struct RenderOptions: Codable, Sendable, Equatable {
     public var waitForGPU: Bool
     public var enableCulling: Bool
     public var maxVisibleSplats: Int
+    public var useProjectionCache: Bool
 
     public init(
         sortMode: SortMode = .gpu,
@@ -71,7 +76,8 @@ public struct RenderOptions: Codable, Sendable, Equatable {
         enableProfiling: Bool = true,
         waitForGPU: Bool = false,
         enableCulling: Bool = true,
-        maxVisibleSplats: Int = 0
+        maxVisibleSplats: Int = 0,
+        useProjectionCache: Bool = false
     ) {
         self.sortMode = sortMode
         self.resolutionScale = resolutionScale
@@ -81,6 +87,7 @@ public struct RenderOptions: Codable, Sendable, Equatable {
         self.waitForGPU = waitForGPU
         self.enableCulling = enableCulling
         self.maxVisibleSplats = maxVisibleSplats
+        self.useProjectionCache = useProjectionCache
     }
 }
 
@@ -91,6 +98,7 @@ public struct FrameStats: Codable, Sendable, Equatable, Identifiable {
     public var gpuFrameMilliseconds: Double?
     public var depthKeyMilliseconds: Double?
     public var sortMilliseconds: Double?
+    public var projectionMilliseconds: Double?
     public var drawMilliseconds: Double?
     public var presentMilliseconds: Double?
     public var totalFrameMilliseconds: Double
@@ -107,6 +115,7 @@ public struct FrameStats: Codable, Sendable, Equatable, Identifiable {
         gpuFrameMilliseconds: Double?,
         depthKeyMilliseconds: Double?,
         sortMilliseconds: Double?,
+        projectionMilliseconds: Double? = nil,
         drawMilliseconds: Double?,
         presentMilliseconds: Double?,
         totalFrameMilliseconds: Double,
@@ -122,6 +131,7 @@ public struct FrameStats: Codable, Sendable, Equatable, Identifiable {
         self.gpuFrameMilliseconds = gpuFrameMilliseconds
         self.depthKeyMilliseconds = depthKeyMilliseconds
         self.sortMilliseconds = sortMilliseconds
+        self.projectionMilliseconds = projectionMilliseconds
         self.drawMilliseconds = drawMilliseconds
         self.presentMilliseconds = presentMilliseconds
         self.totalFrameMilliseconds = totalFrameMilliseconds

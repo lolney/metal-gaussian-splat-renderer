@@ -44,7 +44,18 @@ struct ContentView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 210)
+                .frame(width: 360)
+
+                Toggle(isOn: Binding(
+                    get: { store.options.useProjectionCache },
+                    set: {
+                        store.options.useProjectionCache = $0
+                        store.markEvent($0 ? "Projection cache on" : "Projection cache off")
+                    }
+                )) {
+                    Label("Projection Cache", systemImage: "rectangle.3.group")
+                }
+                .help("Use experimental compute projection and covariance path")
 
                 Toggle(isOn: $store.profilingVisible) {
                     Label("Profiling", systemImage: "chart.xyaxis.line")
