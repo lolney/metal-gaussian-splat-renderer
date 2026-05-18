@@ -75,7 +75,7 @@ public struct RenderOptions: Codable, Sendable, Equatable {
         waitForGPU: Bool = false,
         enableCulling: Bool = true,
         maxVisibleSplats: Int = 0,
-        useProjectionCache: Bool = false
+        useProjectionCache: Bool = true
     ) {
         self.sortMode = sortMode
         self.resolutionScale = resolutionScale

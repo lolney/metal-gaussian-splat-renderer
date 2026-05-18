@@ -13,7 +13,7 @@ struct BenchOptions {
     var maxVisibleSplats = 0
     var maxSplatRadius: Float = 1024
     var enableCulling = true
-    var useProjectionCache = false
+    var useProjectionCache = true
     var output: URL?
     var capture: URL?
 }
@@ -121,6 +121,8 @@ enum SplatBench {
                 options.enableCulling = false
             case "--projection-cache":
                 options.useProjectionCache = true
+            case "--no-projection-cache":
+                options.useProjectionCache = false
             case "--output":
                 options.output = URL(fileURLWithPath: try next())
             case "--capture":
@@ -142,7 +144,7 @@ enum SplatBench {
 
     private static func printUsage() {
         print("""
-        Usage: splatbench --input scene.ply [--frames N] [--warmup N] [--width W] [--height H] [--sort unsorted|radix|gpu|bitonic] [--max-splats N] [--radius px] [--no-culling] [--projection-cache] [--output results.json] [--capture trace.gputrace]
+        Usage: splatbench --input scene.ply [--frames N] [--warmup N] [--width W] [--height H] [--sort unsorted|radix|gpu|bitonic] [--max-splats N] [--radius px] [--no-culling] [--projection-cache|--no-projection-cache] [--output results.json] [--capture trace.gputrace]
         """)
     }
 

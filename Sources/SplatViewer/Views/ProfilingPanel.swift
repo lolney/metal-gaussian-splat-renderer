@@ -262,6 +262,7 @@ private struct ControlsView: View {
             Toggle("Enable profiling", isOn: $store.options.enableProfiling)
             Toggle("Wait for GPU timings", isOn: $store.options.waitForGPU)
             Toggle("Projection cache", isOn: $store.options.useProjectionCache)
+                .help("Project and cull splats once per frame before rasterization")
             HStack {
                 Text("Budget")
                 Stepper(value: Binding(

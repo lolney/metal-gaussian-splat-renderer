@@ -13,15 +13,8 @@ struct BicycleCameraPreset {
     var fy: Float
 
     func camera(width: Int, height: Int) -> Camera {
-        let view = metalViewMatrix()
-        let projection = simd_float4x4.perspective(
-            fx: fx,
-            fy: fy,
-            sourceWidth: sourceWidth,
-            sourceHeight: sourceHeight,
-            nearZ: 0.2,
-            farZ: 200
-        )
+        let view = viewMatrix()
+        let projection = projectionMatrix(width: width, height: height)
         return Camera(
             viewMatrix: view,
             projectionMatrix: projection,
@@ -29,7 +22,19 @@ struct BicycleCameraPreset {
         )
     }
 
-    private func metalViewMatrix() -> simd_float4x4 {
+    func projectionMatrix(width: Int, height: Int) -> simd_float4x4 {
+        let projection = simd_float4x4.perspective(
+            fx: fx,
+            fy: fy,
+            sourceWidth: Float(max(width, 1)),
+            sourceHeight: Float(max(height, 1)),
+            nearZ: 0.2,
+            farZ: 200
+        )
+        return projection
+    }
+
+    func viewMatrix() -> simd_float4x4 {
         let r00 = rotation.columns.0.x
         let r01 = rotation.columns.1.x
         let r02 = rotation.columns.2.x

@@ -55,7 +55,7 @@ struct ContentView: View {
                 )) {
                     Label("Projection Cache", systemImage: "rectangle.3.group")
                 }
-                .help("Use experimental compute projection and covariance path")
+                .help("Project and cull splats once per frame before rasterization")
 
                 Toggle(isOn: $store.profilingVisible) {
                     Label("Profiling", systemImage: "chart.xyaxis.line")
