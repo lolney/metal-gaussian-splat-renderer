@@ -11,7 +11,7 @@
       --panel: #f7f9fb;
       --panel-strong: #eef3f7;
       --ink: #17202a;
-      --muted: #5d6975;
+      --muted: #5f6b76;
       --line: #d9e1e8;
       --blue: #1677d2;
       --green: #1d9a62;
@@ -20,9 +20,7 @@
       --red: #c64040;
       --code: #26323d;
     }
-
     * { box-sizing: border-box; }
-
     body {
       margin: 0;
       background: var(--bg);
@@ -30,38 +28,18 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       line-height: 1.45;
     }
-
     header {
       padding: 42px 52px 30px;
       background: #f9fbfc;
       border-bottom: 1px solid var(--line);
     }
-
     main { padding: 32px 52px 52px; }
-
-    h1 {
-      margin: 0 0 10px;
-      font-size: 36px;
-      letter-spacing: 0;
-    }
-
-    h2 {
-      margin: 0 0 14px;
-      font-size: 23px;
-      letter-spacing: 0;
-    }
-
-    h3 {
-      margin: 0 0 8px;
-      font-size: 16px;
-      letter-spacing: 0;
-    }
-
+    h1 { margin: 0 0 10px; font-size: 36px; letter-spacing: 0; }
+    h2 { margin: 0 0 14px; font-size: 23px; letter-spacing: 0; }
+    h3 { margin: 0 0 8px; font-size: 16px; letter-spacing: 0; }
     p { margin: 8px 0; color: var(--muted); }
-
     a { color: var(--blue); text-decoration: none; }
     a:hover { text-decoration: underline; }
-
     code {
       color: var(--code);
       background: #eef2f6;
@@ -70,22 +48,18 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.92em;
     }
-
     section { margin: 0 0 34px; }
-
     .lede {
       max-width: 980px;
       color: #36424d;
       font-size: 17px;
     }
-
     .meta {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
       margin-top: 18px;
     }
-
     .pill {
       display: inline-flex;
       align-items: center;
@@ -97,60 +71,58 @@
       background: white;
       font-size: 12px;
     }
-
     .grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(210px, 1fr));
+      grid-template-columns: repeat(3, minmax(220px, 1fr));
       gap: 14px;
     }
-
     .two-col {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 18px;
       align-items: start;
     }
-
     .card {
       background: white;
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 16px;
     }
-
-    .callout {
-      border-left: 4px solid var(--blue);
-      background: var(--panel);
+    .card strong { color: var(--ink); }
+    .status {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 3px 7px;
       border-radius: 6px;
-      padding: 14px 16px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
     }
-
-    .callout.warning { border-left-color: var(--orange); }
-
-    .diagram {
-      overflow: auto;
+    .status.primary { color: white; background: var(--green); }
+    .status.reference { color: white; background: var(--blue); }
+    .status.preview { color: white; background: var(--purple); }
+    .status.removed { color: white; background: var(--red); }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 10px;
+    }
+    .flow .step {
+      position: relative;
+      background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fbfcfd;
       padding: 12px;
+      min-height: 104px;
     }
-
-    svg {
-      display: block;
-      max-width: 100%;
-      height: auto;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    .flow .step:not(:last-child)::after {
+      content: ">";
+      position: absolute;
+      right: -10px;
+      top: 38px;
+      color: var(--muted);
+      font-weight: 700;
     }
-
-    .node { fill: #fff; stroke: #bcc9d4; stroke-width: 1.3; }
-    .node-blue { fill: #eaf4ff; stroke: #88bde9; }
-    .node-green { fill: #ebf8f0; stroke: #8ed3ad; }
-    .node-orange { fill: #fff5ea; stroke: #e7b177; }
-    .node-purple { fill: #f2f0ff; stroke: #aca4eb; }
-    .arrow { stroke: #607080; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
-    .label { fill: #26323d; font-size: 13px; font-weight: 600; }
-    .sub { fill: #5f6d78; font-size: 11px; }
-
     table {
       width: 100%;
       border-collapse: collapse;
@@ -160,37 +132,51 @@
       border-radius: 8px;
       overflow: hidden;
     }
-
     th, td {
-      padding: 9px 10px;
       border-bottom: 1px solid var(--line);
+      padding: 9px 10px;
       vertical-align: top;
       text-align: left;
     }
-
-    th {
-      background: var(--panel-strong);
-      color: #33414e;
-      font-weight: 700;
-    }
-
+    th { background: var(--panel-strong); color: #33404b; }
     tr:last-child td { border-bottom: 0; }
-
-    ul { margin: 8px 0 0 18px; padding: 0; color: var(--muted); }
-    li { margin: 6px 0; }
-
-    .cite-list {
+    ul { margin: 8px 0 0 20px; padding: 0; color: var(--muted); }
+    li { margin: 5px 0; }
+    .callout {
+      border: 1px solid #c9e5d3;
+      background: #f2fbf5;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .warn {
+      border-color: #efd1aa;
+      background: #fff8ef;
+    }
+    .diagram {
+      width: 100%;
+      min-height: 210px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 16px;
+    }
+    .links {
       display: grid;
-      grid-template-columns: repeat(2, minmax(260px, 1fr));
-      gap: 8px 16px;
+      grid-template-columns: repeat(3, minmax(180px, 1fr));
+      gap: 8px;
+    }
+    .links a {
+      display: block;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: white;
+      padding: 9px 10px;
       font-size: 13px;
     }
-
-    .small { font-size: 12px; color: var(--muted); }
-
     @media (max-width: 1000px) {
-      header, main { padding-left: 24px; padding-right: 24px; }
-      .grid, .two-col, .cite-list { grid-template-columns: 1fr; }
+      header, main { padding-left: 22px; padding-right: 22px; }
+      .grid, .two-col, .flow, .links { grid-template-columns: 1fr; }
+      .flow .step::after { display: none; }
     }
   </style>
 </head>
@@ -198,538 +184,274 @@
 <header>
   <h1>Metal Gaussian Splat Renderer Architecture</h1>
   <p class="lede">
-    This report describes the current architecture of the SwiftPM macOS Gaussian splat renderer: scene loading,
-    static and per-frame Metal resources, sort modes, shader execution, in-app profiling, and the headless benchmark path.
+    Current-state architecture report for the SwiftPM macOS Gaussian splat renderer after the GPU radix refactor and
+    cleanup pass. The active product shape is a reusable Metal renderer, a SwiftUI viewer, and a headless benchmark
+    runner with profiling data available in both JSON/CSV and the app UI.
   </p>
   <div class="meta">
     <span class="pill">Repo: <a href="https://github.com/lolney/metal-gaussian-splat-renderer">metal-gaussian-splat-renderer</a></span>
-    <span class="pill">Commit: <a href="https://github.com/lolney/metal-gaussian-splat-renderer/tree/abc343ec2acd953cc2a5e17530414ab1375ccfa8"><code>abc343e</code></a></span>
-    <span class="pill">Targets: SwiftUI app, renderer library, <code>splatbench</code></span>
+    <span class="pill">Source snapshot: <a href="https://github.com/lolney/metal-gaussian-splat-renderer/tree/96b5f09"><code>96b5f09</code></a></span>
+    <span class="pill">Report updated: May 18, 2026</span>
+    <span class="pill">Primary path: <code>GPU RADIX</code></span>
   </div>
 </header>
 
 <main>
-  <section>
+  <section class="callout">
     <h2>Executive Summary</h2>
-    <div class="grid">
-      <div class="card">
-        <h3>Renderer Core</h3>
-        <p>
-          <code>SplatRenderer</code> owns Metal device state, render and compute pipelines, static scene GPU resources,
-          and a ring of mutable per-frame resources.
-        </p>
-        <p class="small">
-          Code: <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L7-L23">renderer fields</a>,
-          <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L27-L75">pipeline setup</a>
-        </p>
-      </div>
-      <div class="card">
-        <h3>Resource Lifetime</h3>
-        <p>
-          Static splat data is uploaded to a private GPU buffer; uniforms and mutable order buffers rotate through
-          a three-frame resource ring protected by a semaphore.
-        </p>
-        <p class="small">
-          Code: <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L101-L116">in-flight semaphore</a>,
-          <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L388-L418">private upload</a>
-        </p>
-      </div>
-      <div class="card">
-        <h3>Measurability</h3>
-        <p>
-          Frame stats are returned from every draw, shown in the SwiftUI profiling panel, and exported by the
-          headless benchmark executable as JSON and CSV.
-        </p>
-        <p class="small">
-          Code: <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatTypes.swift#L87-L133">FrameStats</a>,
-          <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/splatbench/main.swift#L69-L85">benchmark output</a>
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <h2>System Map</h2>
-    <div class="diagram">
-      <svg width="1120" height="420" viewBox="0 0 1120 420" role="img" aria-label="System architecture diagram">
-        <defs>
-          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#607080"></path>
-          </marker>
-        </defs>
-
-        <rect class="node node-blue" x="28" y="44" width="170" height="70" rx="8"></rect>
-        <text class="label" x="48" y="72">PLY file</text>
-        <text class="sub" x="48" y="92">3DGS attributes</text>
-
-        <rect class="node node-blue" x="258" y="44" width="190" height="70" rx="8"></rect>
-        <text class="label" x="278" y="72">SplatScene.load</text>
-        <text class="sub" x="278" y="92">parse, diagnose, bounds</text>
-
-        <rect class="node node-green" x="508" y="28" width="220" height="102" rx="8"></rect>
-        <text class="label" x="528" y="58">SplatRenderer.load</text>
-        <text class="sub" x="528" y="79">CPU sort copy</text>
-        <text class="sub" x="528" y="98">packed splats to staging</text>
-        <text class="sub" x="528" y="117">blit to private buffer</text>
-
-        <rect class="node node-purple" x="788" y="44" width="260" height="70" rx="8"></rect>
-        <text class="label" x="808" y="72">SceneResources</text>
-        <text class="sub" x="808" y="92">private splat buffer + counts</text>
-
-        <rect class="node node-orange" x="88" y="210" width="220" height="78" rx="8"></rect>
-        <text class="label" x="108" y="238">SwiftUI viewer</text>
-        <text class="sub" x="108" y="258">MTKView + orbit camera</text>
-        <text class="sub" x="108" y="276">profiling panel</text>
-
-        <rect class="node node-orange" x="88" y="318" width="220" height="64" rx="8"></rect>
-        <text class="label" x="108" y="344">splatbench</text>
-        <text class="sub" x="108" y="364">fixed camera path, JSON/CSV</text>
-
-        <rect class="node node-green" x="388" y="244" width="240" height="86" rx="8"></rect>
-        <text class="label" x="408" y="270">SplatRenderer.draw</text>
-        <text class="sub" x="408" y="290">select sort mode</text>
-        <text class="sub" x="408" y="309">encode compute + render</text>
-
-        <rect class="node node-purple" x="688" y="226" width="218" height="122" rx="8"></rect>
-        <text class="label" x="708" y="252">FrameResources[i]</text>
-        <text class="sub" x="708" y="273">uniform buffer</text>
-        <text class="sub" x="708" y="292">mode-local order buffer</text>
-        <text class="sub" x="708" y="311">prepared draw count</text>
-        <text class="sub" x="708" y="330">active sort mode</text>
-
-        <rect class="node node-blue" x="966" y="244" width="120" height="86" rx="8"></rect>
-        <text class="label" x="986" y="270">Metal GPU</text>
-        <text class="sub" x="986" y="290">compute</text>
-        <text class="sub" x="986" y="309">blend draw</text>
-
-        <path class="arrow" d="M198 79 H258"></path>
-        <path class="arrow" d="M448 79 H508"></path>
-        <path class="arrow" d="M728 79 H788"></path>
-        <path class="arrow" d="M198 210 C250 168 340 135 508 105"></path>
-        <path class="arrow" d="M198 318 C270 290 322 286 388 286"></path>
-        <path class="arrow" d="M308 249 H388"></path>
-        <path class="arrow" d="M628 286 H688"></path>
-        <path class="arrow" d="M906 286 H966"></path>
-        <path class="arrow" d="M918 114 C940 154 972 196 1008 244"></path>
-      </svg>
-    </div>
     <p>
-      The app and benchmark both drive the same renderer API. The app embeds <code>MTKView</code> in SwiftUI and records
-      live frame stats; the benchmark creates a renderer, loads the same scenes, renders offscreen frames, and writes
-      timing files. The shared draw path is anchored at
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L88-L250">SplatRenderer.draw</a>.
+      The renderer now has a tighter runtime surface: <code>unsorted</code>, <code>radix</code>, <code>gpu</code>,
+      and <code>bitonic</code>. The prior tiled experiment and non-radix CPU sort mode have been removed from the
+      product/UI/CLI surface. CPU radix remains as a reference path; GPU radix is the default path.
+    </p>
+    <p>
+      Resource ownership is explicit enough for continued optimization: static scene splats upload to a private
+      Metal buffer, per-frame mutable state lives in a three-frame resource ring, mode switches reset order state, and
+      headless benchmarks exercise the same renderer code used by the app.
     </p>
   </section>
 
   <section>
-    <h2>Public Interfaces and Data Contracts</h2>
+    <h2>Products And Public Surface</h2>
+    <div class="grid">
+      <div class="card">
+        <h3><code>SplatRenderer</code></h3>
+        <p>Reusable Metal renderer library. Owns the device, command queue, pipelines, scene resources, frame resources, and draw path.</p>
+      </div>
+      <div class="card">
+        <h3><code>SplatViewer</code></h3>
+        <p>SwiftUI macOS app with <code>MTKView</code>, file loading, camera controls, sort picker, projection-cache toggle, and profiling panel.</p>
+      </div>
+      <div class="card">
+        <h3><code>splatbench</code></h3>
+        <p>Headless benchmark executable. Runs fixed camera paths, writes JSON/CSV timing data, and supports optional Metal capture.</p>
+      </div>
+    </div>
     <table>
-      <thead>
-        <tr>
-          <th>Interface</th>
-          <th>Role</th>
-          <th>Primary code links</th>
-        </tr>
-      </thead>
+      <thead><tr><th>Interface</th><th>Current role</th><th>Notes</th></tr></thead>
       <tbody>
         <tr>
           <td><code>SplatScene.load(url:)</code></td>
-          <td>Memory-maps the PLY file when possible, parses ASCII or binary little-endian input, computes diagnostics, and stores CPU splat records.</td>
-          <td>
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatScene.swift#L16-L23">load and pack</a>,
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatScene.swift#L69-L83">loader dispatch</a>,
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatScene.swift#L85-L120">binary validation</a>
-          </td>
-        </tr>
-        <tr>
-          <td><code>RenderOptions</code></td>
-          <td>Controls sort mode, profiling behavior, culling, maximum visible splats, and splat radius clamp.</td>
-          <td>
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatTypes.swift#L24-L54">SortMode</a>,
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatTypes.swift#L56-L85">RenderOptions</a>
-          </td>
+          <td>Parses Gaussian <code>.ply</code> files and produces source splats plus diagnostics.</td>
+          <td>Scene still retains source splats because CPU radix reference mode can be selected after load.</td>
         </tr>
         <tr>
           <td><code>SplatRenderer.load(scene:)</code></td>
-          <td>Waits for in-flight frames, retains source splats for CPU sort, uploads packed splats to private GPU memory, and clears per-frame mode state.</td>
-          <td>
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L78-L86">load entry point</a>,
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L388-L418">scene upload</a>,
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L421-L435">resource reset and wait</a>
-          </td>
+          <td>Waits for in-flight frames, uploads packed splats to private GPU storage, resets frame resources.</td>
+          <td>Scene upload is isolated from per-frame ordering and raster resources.</td>
         </tr>
         <tr>
           <td><code>SplatRenderer.draw(...)</code></td>
-          <td>Chooses active draw count and sort mode, rotates into frame resources, encodes sorting and drawing, presents, and returns metrics.</td>
-          <td>
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L88-L160">frame setup</a>,
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L162-L207">sort and draw encoding</a>,
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L216-L250">commit and stats</a>
-          </td>
+          <td>Builds a frame plan, prepares order resources, encodes ordering/projection/raster, returns <code>FrameStats</code>.</td>
+          <td>The same draw path is used by the viewer and offscreen benchmark harness.</td>
+        </tr>
+        <tr>
+          <td><code>RenderOptions</code></td>
+          <td>Sort mode, resolution scale, SH degree placeholder, radius clamp, culling, profiling, draw budget, projection cache.</td>
+          <td><code>SortMode</code> is now the focused four-mode set.</td>
         </tr>
         <tr>
           <td><code>FrameStats</code></td>
-          <td>Normalizes timing and throughput metrics for the app UI, exported profiling sessions, and benchmark summaries.</td>
-          <td>
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatTypes.swift#L87-L133">FrameStats definition</a>,
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L228-L250">stats construction</a>
-          </td>
+          <td>Reports CPU encode, GPU frame, depth-key, sort, projection, draw, visible splats, and memory estimates.</td>
+          <td>These fields feed both CLI outputs and the in-app profiling visualizations.</td>
         </tr>
       </tbody>
     </table>
   </section>
 
   <section>
-    <h2>Frame Execution Pipeline</h2>
-    <div class="diagram">
-      <svg width="1120" height="330" viewBox="0 0 1120 330" role="img" aria-label="Frame pipeline diagram">
-        <defs>
-          <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#607080"></path>
-          </marker>
-        </defs>
-        <style>.arrow2{stroke:#607080;stroke-width:1.6;fill:none;marker-end:url(#arrow2)}</style>
-
-        <rect class="node node-orange" x="28" y="44" width="148" height="72" rx="8"></rect>
-        <text class="label" x="46" y="72">Wait slot</text>
-        <text class="sub" x="46" y="92">semaphore</text>
-
-        <rect class="node node-purple" x="222" y="44" width="170" height="72" rx="8"></rect>
-        <text class="label" x="240" y="72">Pick ring index</text>
-        <text class="sub" x="240" y="92">frameIndex % 3</text>
-
-        <rect class="node node-green" x="438" y="44" width="176" height="72" rx="8"></rect>
-        <text class="label" x="456" y="72">Write uniforms</text>
-        <text class="sub" x="456" y="92">camera + options</text>
-
-        <rect class="node node-blue" x="660" y="28" width="190" height="104" rx="8"></rect>
-        <text class="label" x="680" y="56">Build order</text>
-        <text class="sub" x="680" y="77">GPU: depth keys + sort</text>
-        <text class="sub" x="680" y="96">CPU: sorted indices</text>
-        <text class="sub" x="680" y="115">Unsorted: sampled order</text>
-
-        <rect class="node node-green" x="902" y="44" width="176" height="72" rx="8"></rect>
-        <text class="label" x="920" y="72">Draw quads</text>
-        <text class="sub" x="920" y="92">6 vertices per splat</text>
-
-        <rect class="node node-orange" x="340" y="206" width="188" height="72" rx="8"></rect>
-        <text class="label" x="358" y="234">Commit command</text>
-        <text class="sub" x="358" y="254">present if drawable</text>
-
-        <rect class="node node-purple" x="596" y="206" width="196" height="72" rx="8"></rect>
-        <text class="label" x="614" y="234">Measure stats</text>
-        <text class="sub" x="614" y="254">CPU, GPU, memory est.</text>
-
-        <rect class="node node-orange" x="860" y="206" width="178" height="72" rx="8"></rect>
-        <text class="label" x="878" y="234">Release slot</text>
-        <text class="sub" x="878" y="254">completion handler</text>
-
-        <path class="arrow2" d="M176 80 H222"></path>
-        <path class="arrow2" d="M392 80 H438"></path>
-        <path class="arrow2" d="M614 80 H660"></path>
-        <path class="arrow2" d="M850 80 H902"></path>
-        <path class="arrow2" d="M990 116 C980 170 900 202 792 236"></path>
-        <path class="arrow2" d="M528 242 H596"></path>
-        <path class="arrow2" d="M792 242 H860"></path>
-      </svg>
+    <h2>Frame Pipeline</h2>
+    <div class="flow">
+      <div class="step">
+        <h3>Scene Upload</h3>
+        <p>Pack <code>Splat</code> values, stage through shared memory, blit into a private <code>splatBuffer</code>.</p>
+      </div>
+      <div class="step">
+        <h3>Frame Plan</h3>
+        <p>Clamp options, choose draw count, compute padded count only when the chosen mode needs it.</p>
+      </div>
+      <div class="step">
+        <h3>Ordering</h3>
+        <p>GPU radix, bitonic reference, CPU radix reference, or sampled unsorted order.</p>
+      </div>
+      <div class="step">
+        <h3>Projection</h3>
+        <p>Optional compute pass projects each selected splat into compact screen-space data.</p>
+      </div>
+      <div class="step">
+        <h3>Raster + Stats</h3>
+        <p>Composite instanced quads, commit, wait when profiling, and return timing/memory estimates.</p>
+      </div>
     </div>
-    <p>
-      The ring matters because the order buffer is both written and read during frame execution. The renderer waits for
-      an available in-flight slot, attaches a command-buffer completion handler, and only then reuses the corresponding
-      <code>FrameResources</code>. This is visible in the semaphore path
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L101-L116">here</a>,
-      the ring-index selection
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L150-L160">here</a>,
-      and the frame-resource structures
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L504-L525">here</a>.
-    </p>
   </section>
 
   <section>
     <h2>Resource Ownership</h2>
     <div class="two-col">
       <div class="card">
-        <h3>Static Scene Resources</h3>
-        <p>
-          The renderer's long-lived GPU scene state is intentionally narrow: a private splat buffer plus counts.
-          Upload happens through a shared staging buffer and a blit command, after which the packed CPU array can fall
-          out of scope.
-        </p>
+        <h3>Scene Lifetime</h3>
         <ul>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L388-L418">makeSceneResources</a> creates the private splat buffer and staging upload.</li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L521-L525">SceneResources</a> stores only the Metal buffer and scene size metadata.</li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L78-L86">load(scene:)</a> waits for in-flight frames before replacing scene resources.</li>
+          <li><code>SceneResources</code> owns the private Metal splat buffer and scene count.</li>
+          <li><code>cpuSortSplats</code> is retained only to support CPU radix reference mode.</li>
+          <li>Loading a new scene waits for the resource ring to drain before replacing scene resources.</li>
+          <li>Offscreen render targets are cached by size and kept in private GPU storage.</li>
         </ul>
       </div>
       <div class="card">
-        <h3>Per-Frame Mutable Resources</h3>
-        <p>
-          Mutable resources live in <code>FrameResources</code>: each frame slot owns one uniform buffer and per-mode
-          order-buffer state. Switching sort modes clears that frame slot's mode state before allocating a new order
-          buffer.
-        </p>
+        <h3>Frame Lifetime</h3>
         <ul>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L67-L75">initial uniform ring allocation</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L372-L386">order buffer allocation and mode reset</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L515-L519">FrameResources fields</a></li>
+          <li>Three <code>FrameResources</code> rotate behind an in-flight semaphore.</li>
+          <li>Uniforms are shared per-frame buffers.</li>
+          <li>Order buffers are mode-local and reinitialized when sort modes change.</li>
+          <li>GPU radix scratch, histograms, offsets, bucket totals, and bucket starts are per-frame resources.</li>
+          <li>Projection-cache output is a private per-frame buffer sized to active draw count.</li>
         </ul>
       </div>
-    </div>
-    <div class="callout">
-      <strong>Architectural invariant:</strong>
-      <p>
-        <code>SceneResources</code> are replaced only after all in-flight frames drain. <code>FrameResources</code> are
-        reused only after the GPU signals the corresponding command buffer. That separates static GPU-read-mostly state
-        from per-frame mutable state.
-      </p>
     </div>
   </section>
 
   <section>
     <h2>Sort Modes</h2>
-    <div class="diagram">
-      <svg width="1120" height="330" viewBox="0 0 1120 330" role="img" aria-label="Sort mode decision diagram">
-        <defs>
-          <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#607080"></path>
-          </marker>
-        </defs>
-        <style>.arrow3{stroke:#607080;stroke-width:1.6;fill:none;marker-end:url(#arrow3)}</style>
-
-        <rect class="node" x="32" y="120" width="190" height="74" rx="8"></rect>
-        <text class="label" x="52" y="149">RenderOptions</text>
-        <text class="sub" x="52" y="169">sortMode + maxVisible</text>
-
-        <rect class="node node-blue" x="310" y="36" width="210" height="84" rx="8"></rect>
-        <text class="label" x="330" y="64">GPU sort</text>
-        <text class="sub" x="330" y="84">depthKeyKernel</text>
-        <text class="sub" x="330" y="103">bitonicSortKernel</text>
-
-        <rect class="node node-orange" x="310" y="130" width="210" height="84" rx="8"></rect>
-        <text class="label" x="330" y="158">CPU sort</text>
-        <text class="sub" x="330" y="178">SplatScene.sortedIndices</text>
-        <text class="sub" x="330" y="197">write SortPair buffer</text>
-
-        <rect class="node node-green" x="310" y="224" width="210" height="74" rx="8"></rect>
-        <text class="label" x="330" y="252">Unsorted</text>
-        <text class="sub" x="330" y="272">sample scene indices</text>
-
-        <rect class="node node-purple" x="628" y="120" width="210" height="74" rx="8"></rect>
-        <text class="label" x="648" y="149">Order buffer</text>
-        <text class="sub" x="648" y="169">SortPair(key, index)</text>
-
-        <rect class="node node-blue" x="918" y="120" width="164" height="74" rx="8"></rect>
-        <text class="label" x="938" y="149">splatVertex</text>
-        <text class="sub" x="938" y="169">instance -> splat</text>
-
-        <path class="arrow3" d="M222 157 C260 108 276 78 310 78"></path>
-        <path class="arrow3" d="M222 157 H310"></path>
-        <path class="arrow3" d="M222 157 C262 208 278 260 310 260"></path>
-        <path class="arrow3" d="M520 78 C570 100 600 126 628 149"></path>
-        <path class="arrow3" d="M520 172 H628"></path>
-        <path class="arrow3" d="M520 260 C572 232 600 196 628 169"></path>
-        <path class="arrow3" d="M838 157 H918"></path>
-      </svg>
-    </div>
     <table>
-      <thead>
-        <tr>
-          <th>Mode</th>
-          <th>Where order comes from</th>
-          <th>Tradeoff</th>
-        </tr>
-      </thead>
+      <thead><tr><th>Mode</th><th>Status</th><th>Implementation</th><th>Use case</th></tr></thead>
       <tbody>
         <tr>
-          <td><code>gpu</code></td>
-          <td>
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L288-L307">depth-key encoder</a>
-            followed by
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L309-L326">bitonic sort dispatches</a>,
-            running kernels defined at
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/ShaderSource.swift#L63-L115">ShaderSource lines 63-115</a>.
-          </td>
-          <td>Best runtime path for sorted output at interactive budgets; sort work scales with padded active draw count.</td>
+          <td><code>gpu</code> / <code>GPU RADIX</code></td>
+          <td><span class="status primary">DEFAULT</span></td>
+          <td>GPU depth-key generation plus four 8-bit radix passes over <code>SortPair</code>.</td>
+          <td>Primary interactive and benchmark path for sorted rendering.</td>
         </tr>
         <tr>
-          <td><code>cpu</code></td>
-          <td>
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatScene.swift#L29-L36">SplatScene.sortedIndices</a>
-            computes far-to-near order, then
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L328-L340">updateCPUOrder</a>
-            writes the order buffer.
-          </td>
-          <td>Useful as a correctness/reference path; intentionally available even when slow on large scenes.</td>
+          <td><code>radix</code> / <code>CPU RADIX</code></td>
+          <td><span class="status reference">REFERENCE</span></td>
+          <td>CPU-generated depth keys and CPU radix ordering, written into the per-frame order buffer.</td>
+          <td>Correctness/reference path for small scenes and debugging. Not expected to be fast at 100k+ splats.</td>
         </tr>
         <tr>
-          <td><code>unsorted</code></td>
-          <td>
-            <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L342-L370">updateUnsortedOrderIfNeeded</a>
-            and <code>writeUnsortedOrder</code> write sampled scene indices and sentinel-fill unused entries.
-          </td>
-          <td>Avoids depth sorting entirely; useful for very large scenes, profiling draw cost, and quick inspection.</td>
+          <td><code>bitonic</code> / <code>BITONIC</code></td>
+          <td><span class="status reference">REFERENCE</span></td>
+          <td>GPU depth-key generation plus legacy global bitonic sort.</td>
+          <td>Comparator for GPU radix behavior and performance. Still useful because it stresses command and memory traffic differently.</td>
+        </tr>
+        <tr>
+          <td><code>unsorted</code> / <code>UNSORTED</code></td>
+          <td><span class="status preview">PREVIEW</span></td>
+          <td>Sampled source order only; no depth-key or sort work.</td>
+          <td>Large-scene preview, profiling isolation, and visual sanity checks.</td>
+        </tr>
+        <tr>
+          <td><code>tiled</code> and old <code>cpu</code></td>
+          <td><span class="status removed">REMOVED</span></td>
+          <td>Removed from enum, app picker, CLI help, benchmark script, and tests.</td>
+          <td>Future tile/bin work should return as a proper GPU architecture, not a productized CPU-side approximation.</td>
         </tr>
       </tbody>
     </table>
   </section>
 
   <section>
-    <h2>Shader Architecture</h2>
+    <h2>GPU Radix Path</h2>
     <div class="two-col">
       <div class="card">
-        <h3>Compute</h3>
-        <p>
-          The depth-key kernel maps active instance IDs to source splat indices, transforms splat centers into view
-          space, and writes a <code>SortPair</code>. The bitonic kernel then performs in-place pairwise swaps.
-        </p>
+        <h3>Current Design</h3>
         <ul>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/ShaderSource.swift#L63-L86">depthKeyKernel</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/ShaderSource.swift#L88-L115">bitonicSortKernel</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L453-L458">compute dispatch sizing</a></li>
+          <li><code>depthKeyKernel</code> writes <code>(depthKey, splatIndex)</code> pairs.</li>
+          <li>Each radix pass clears histograms, builds per-block histograms, computes offsets, computes bucket starts, and scatters.</li>
+          <li>After four 8-bit passes, the sorted result lands back in the frame order buffer.</li>
+          <li>Scratch and histogram resources are allocated per frame resource and grow to capacity.</li>
         </ul>
       </div>
       <div class="card">
-        <h3>Rasterization</h3>
-        <p>
-          The vertex shader emits a camera-facing quad per splat instance, uses the order buffer to select the splat,
-          projects radius into pixels, applies optional coarse culling, and clamps splat size. The fragment shader
-          evaluates the Gaussian falloff and pre-multiplied color.
-        </p>
+        <h3>Known Limits</h3>
         <ul>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/ShaderSource.swift#L117-L184">splatVertex</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/ShaderSource.swift#L186-L193">splatFragment</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L51-L63">blend setup</a></li>
+          <li>The prefix and bucket-start stages are intentionally simple, not a fully optimized parallel scan.</li>
+          <li>The path remains global-order based; it has not yet become a tile-local compositor.</li>
+          <li>Sorting still happens every frame for <code>gpu</code>, even for camera changes where approximate ordering might be enough.</li>
+          <li>Memory-bandwidth estimates are model estimates, not hardware counter reads.</li>
         </ul>
       </div>
     </div>
   </section>
 
   <section>
-    <h2>Viewer, Camera, and Profiling UI</h2>
-    <div class="two-col">
-      <div class="card">
-        <h3>SwiftUI + MTKView</h3>
-        <p>
-          <code>MetalViewport</code> bridges SwiftUI to <code>MTKView</code>, creates the renderer, loads scenes when
-          the store changes, and calls <code>renderer.draw</code> from the draw callback.
-        </p>
-        <ul>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatViewer/Views/MetalViewport.swift#L14-L27">MTKView setup</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatViewer/Views/MetalViewport.swift#L58-L68">scene load into renderer</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatViewer/Views/MetalViewport.swift#L78-L102">draw callback</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatViewer/Views/MetalViewport.swift#L128-L170">orbit camera controller</a></li>
-        </ul>
-      </div>
-      <div class="card">
-        <h3>Profiling Panel</h3>
-        <p>
-          The profiling UI shows frame-time budget lines, GPU and memory summaries, CPU encode-stage bars, scene stats,
-          and export controls. It reads the same <code>FrameStats</code> objects returned by the renderer.
-        </p>
-        <ul>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatViewer/Views/ProfilingPanel.swift#L47-L80">panel composition</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatViewer/Views/ProfilingPanel.swift#L130-L165">frame graph and FPS budget lines</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatViewer/Views/ProfilingPanel.swift#L167-L202">CPU encode bars</a></li>
-          <li><a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatViewer/Views/ProfilingPanel.swift#L204-L232">memory bandwidth graph</a></li>
-        </ul>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <h2>Headless Benchmark Path</h2>
-    <p>
-      <code>splatbench</code> is intentionally a thin client over the same renderer: it parses CLI options, loads a
-      scene, constructs a renderer, renders deterministic orbit-camera offscreen frames, optionally captures Metal, and
-      writes JSON plus CSV.
-    </p>
-    <div class="diagram">
-      <svg width="1120" height="250" viewBox="0 0 1120 250" role="img" aria-label="Benchmark pipeline diagram">
-        <defs>
-          <marker id="arrow4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#607080"></path>
-          </marker>
-        </defs>
-        <style>.arrow4{stroke:#607080;stroke-width:1.6;fill:none;marker-end:url(#arrow4)}</style>
-        <rect class="node node-blue" x="30" y="76" width="168" height="78" rx="8"></rect>
-        <text class="label" x="50" y="105">CLI options</text>
-        <text class="sub" x="50" y="125">sort, size, frames</text>
-        <rect class="node node-green" x="260" y="76" width="182" height="78" rx="8"></rect>
-        <text class="label" x="280" y="105">Load scene</text>
-        <text class="sub" x="280" y="125">SplatScene.load</text>
-        <rect class="node node-purple" x="504" y="76" width="190" height="78" rx="8"></rect>
-        <text class="label" x="524" y="105">Offscreen draw</text>
-        <text class="sub" x="524" y="125">drawOffscreen loop</text>
-        <rect class="node node-orange" x="756" y="76" width="160" height="78" rx="8"></rect>
-        <text class="label" x="776" y="105">Summarize</text>
-        <text class="sub" x="776" y="125">warmup, avg, p95</text>
-        <rect class="node node-blue" x="978" y="76" width="118" height="78" rx="8"></rect>
-        <text class="label" x="998" y="105">Files</text>
-        <text class="sub" x="998" y="125">JSON + CSV</text>
-        <path class="arrow4" d="M198 115 H260"></path>
-        <path class="arrow4" d="M442 115 H504"></path>
-        <path class="arrow4" d="M694 115 H756"></path>
-        <path class="arrow4" d="M916 115 H978"></path>
-      </svg>
-    </div>
-    <p>
-      Code links:
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/splatbench/main.swift#L20-L86">benchmark main loop</a>,
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/splatbench/main.swift#L88-L143">CLI parsing and usage</a>,
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/splatbench/main.swift#L145-L165">orbit camera and capture</a>,
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/splatbench/main.swift#L167-L185">CSV export</a>,
-      and
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/splatbench/main.swift#L189-L224">summary statistics</a>.
-    </p>
-  </section>
-
-  <section>
-    <h2>Architecture Notes and Open Edges</h2>
+    <h2>Projection And Raster</h2>
     <div class="grid">
       <div class="card">
-        <h3>Correctness Foundation</h3>
-        <p>
-          Per-frame order buffers remove the inter-frame race class for GPU, CPU, and unsorted modes. Mode switches are
-          intentionally treated as resource-state boundaries.
-        </p>
+        <h3>Baseline Vertex Path</h3>
+        <p>Draws six vertices per splat instance. The vertex shader reads the sorted pair and packed splat, computes covariance ellipse axes, and emits a camera-facing quad.</p>
       </div>
       <div class="card">
-        <h3>Performance Shape</h3>
-        <p>
-          GPU sorting is still bitonic and globally ordered, which is simple and measurable but not the likely final
-          large-scene architecture. The current design makes tile/bin or hierarchical experiments easier to add behind
-          runtime flags.
-        </p>
+        <h3>Projection Cache</h3>
+        <p>Optional compute prepass projects selected splats once into <code>ProjectedSplat</code>. The projected render pipeline then reads compact screen-space data.</p>
       </div>
       <div class="card">
-        <h3>Memory Shape</h3>
-        <p>
-          Static splats are now GPU-private after upload. CPU sort keeps source splats, which is deliberate while CPU
-          mode remains user-selectable after load.
-        </p>
+        <h3>Quality Model</h3>
+        <p>The shader now uses a screen-space covariance/eigenvalue treatment for ellipse axes. Radius clamp and coarse frustum culling remain runtime options.</p>
       </div>
     </div>
   </section>
 
   <section>
-    <h2>Code Citation Index</h2>
-    <div class="cite-list">
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L7-L23">Renderer ownership fields</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L27-L75">Metal pipeline initialization</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L78-L86">Scene load into renderer</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L88-L250">Draw path</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L288-L326">Depth-key and bitonic encode</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L328-L370">CPU and unsorted order writers</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L372-L386">Order-buffer allocation</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L388-L418">Private splat-buffer upload</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatRenderer.swift#L437-L450">Estimated memory traffic</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/ShaderSource.swift#L63-L115">Compute shaders</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/ShaderSource.swift#L117-L193">Vertex and fragment shaders</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatScene.swift#L16-L36">Scene loading and CPU sort helper</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatRenderer/SplatTypes.swift#L24-L133">SortMode, RenderOptions, FrameStats</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatViewer/Views/MetalViewport.swift#L14-L102">Viewer bridge and draw callback</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/SplatViewer/Views/ProfilingPanel.swift#L47-L232">Profiling panel graphs</a>
-      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/abc343ec2acd953cc2a5e17530414ab1375ccfa8/Sources/splatbench/main.swift#L20-L224">Headless benchmark</a>
+    <h2>Profiling Surface</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>In-App Panel</h3>
+        <p>Shows frame history, GPU summary, memory estimate, CPU encode-stage bars, scene stats, and controls for pause, clear, export, profiling, wait-for-GPU, projection cache, budget, and max radius.</p>
+      </div>
+      <div class="card">
+        <h3>CLI Output</h3>
+        <p><code>splatbench</code> supports <code>--sort unsorted|radix|gpu|bitonic</code>, <code>--projection-cache</code>, <code>--max-splats</code>, JSON/CSV output, and optional <code>.gputrace</code> capture.</p>
+      </div>
+      <div class="card">
+        <h3>Measured Fields</h3>
+        <p>Frame stats include total frame, CPU encode, GPU command buffer, depth-key, sort, projection, draw, visible/total splats, estimated bytes, and estimated GB/s.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="callout warn">
+    <h2>Remaining Architectural Risks</h2>
+    <ul>
+      <li>GPU radix is a better long-term fit than bitonic, but the current implementation is still a straightforward first version, not a tuned production sort.</li>
+      <li>The renderer still uses global ordering. A future tile/bin renderer should be introduced as a clean GPU phase after the current radix path is stable.</li>
+      <li>CPU radix keeps source splats resident. That is acceptable for a reference path, but very large scenes still pay CPU memory overhead.</li>
+      <li>Projection cache is available behind a flag; it should stay optional until benchmarks show clear wins across representative scenes.</li>
+      <li>Memory bandwidth visualization is useful for direction, but hardware-counter profiling in Instruments/Xcode should remain the source of truth for bandwidth bottlenecks.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Validation State</h2>
+    <table>
+      <thead><tr><th>Check</th><th>Result</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><code>swift build</code></td><td>Passed</td><td>Verified after cleanup of obsolete modes.</td></tr>
+        <tr><td><code>swift test</code></td><td>Passed</td><td>Six tests passed, including renderer smoke and mode switching.</td></tr>
+        <tr><td><code>splatbench --help</code></td><td>Passed</td><td>Help lists only <code>unsorted|radix|gpu|bitonic</code>.</td></tr>
+        <tr><td>Smoke benchmarks</td><td>Passed</td><td>Ran <code>unsorted</code>, <code>radix</code>, <code>gpu</code>, and <code>bitonic</code> against <code>in_the_wild_1.ply</code>.</td></tr>
+        <tr><td><code>script/package_app.sh</code></td><td>Passed</td><td>Packaged <code>dist/SplatViewer.app</code>.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Current Source Links</h2>
+    <div class="links">
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/SplatTypes.swift#L24-L56">SortMode enum</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/SplatTypes.swift#L58-L90">RenderOptions</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/SplatTypes.swift#L92-L142">FrameStats</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/SplatRenderer.swift#L120-L300">Draw path</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/SplatRenderer.swift#L346-L454">Depth, bitonic, and radix encoders</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/SplatRenderer.swift#L504-L584">CPU radix and unsorted writers</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/SplatRenderer.swift#L586-L654">Frame order/projection/radix resources</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/SplatRenderer.swift#L656-L706">Scene upload and reset</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/SplatRenderer.swift#L708-L738">Memory estimate model</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/ShaderSource.swift#L82-L115">Covariance ellipse shader helper</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/ShaderSource.swift#L117-L192">Depth and projection kernels</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatRenderer/ShaderSource.swift#L223-L311">Radix kernels</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatViewer/Views/ContentView.swift#L30-L63">Viewer toolbar controls</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/SplatViewer/Views/ProfilingPanel.swift#L47-L90">Profiling panel composition</a>
+      <a href="https://github.com/lolney/metal-gaussian-splat-renderer/blob/96b5f09/Sources/splatbench/main.swift#L90-L147">Benchmark CLI parsing</a>
     </div>
   </section>
 </main>
