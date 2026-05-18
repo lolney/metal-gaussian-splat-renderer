@@ -25,6 +25,7 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable, Codable {
     case unsorted
     case tiled
     case radix
+    case bitonic
     case cpu
     case gpu
 
@@ -33,9 +34,10 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable, Codable {
         switch self {
         case .unsorted: "UNSORTED"
         case .tiled: "TILED"
-        case .radix: "RADIX"
+        case .radix: "CPU RADIX"
+        case .bitonic: "BITONIC"
         case .cpu: "CPU"
-        case .gpu: "GPU"
+        case .gpu: "GPU RADIX"
         }
     }
 

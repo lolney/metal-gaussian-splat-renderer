@@ -14,6 +14,10 @@ public final class SplatRenderer {
     private let projectedRenderPipeline: MTLRenderPipelineState
     private let depthKeyPipeline: MTLComputePipelineState
     private let sortPipeline: MTLComputePipelineState
+    private let radixHistogramPipeline: MTLComputePipelineState
+    private let radixPrefixPipeline: MTLComputePipelineState
+    private let radixBucketStartPipeline: MTLComputePipelineState
+    private let radixScatterPipeline: MTLComputePipelineState
     private let projectionPipeline: MTLComputePipelineState
     private var sceneResources: SceneResources?
     private var cpuSortSplats: [Splat] = []
@@ -47,7 +51,11 @@ public final class SplatRenderer {
             let fragment = library.makeFunction(name: "splatFragment"),
             let project = library.makeFunction(name: "projectSplatsKernel"),
             let depth = library.makeFunction(name: "depthKeyKernel"),
-            let sort = library.makeFunction(name: "bitonicSortKernel")
+            let sort = library.makeFunction(name: "bitonicSortKernel"),
+            let radixHistogram = library.makeFunction(name: "radixHistogramKernel"),
+            let radixPrefix = library.makeFunction(name: "radixPrefixKernel"),
+            let radixBucketStart = library.makeFunction(name: "radixBucketStartKernel"),
+            let radixScatter = library.makeFunction(name: "radixScatterKernel")
         else {
             throw SplatError.shaderBuildFailed("missing shader entry point")
         }
@@ -82,6 +90,10 @@ public final class SplatRenderer {
 
         depthKeyPipeline = try device.makeComputePipelineState(function: depth)
         sortPipeline = try device.makeComputePipelineState(function: sort)
+        radixHistogramPipeline = try device.makeComputePipelineState(function: radixHistogram)
+        radixPrefixPipeline = try device.makeComputePipelineState(function: radixPrefix)
+        radixBucketStartPipeline = try device.makeComputePipelineState(function: radixBucketStart)
+        radixScatterPipeline = try device.makeComputePipelineState(function: radixScatter)
         projectionPipeline = try device.makeComputePipelineState(function: project)
 
         var resources: [FrameResources] = []
@@ -161,10 +173,13 @@ public final class SplatRenderer {
         let resourceIndex = frameIndex % max(1, frameResources.count)
         frameIndex += 1
         var frameResource = frameResources[resourceIndex]
-        let requestedOrderCapacity = plan.sortMode == .gpu ? plan.sortPaddedCount : max(plan.drawCount, 1)
+        let requestedOrderCapacity = plan.sortMode == .bitonic ? plan.sortPaddedCount : max(plan.drawCount, 1)
         let orderAllocation = try orderBuffer(for: plan.sortMode, paddedCount: requestedOrderCapacity, frameResource: &frameResource)
         let orderBuffer = orderAllocation.buffer
         let orderCapacity = orderAllocation.capacity
+        let radixResources = try plan.sortMode == .gpu
+            ? radixResources(drawCount: max(plan.drawCount, 1), frameResource: &frameResource)
+            : nil
         let projectionBuffer = try options.useProjectionCache
             ? projectedBuffer(drawCount: max(plan.drawCount, 1), frameResource: &frameResource)
             : nil
@@ -175,7 +190,7 @@ public final class SplatRenderer {
 
         var depthKeyMilliseconds: Double?
         var sortMilliseconds: Double?
-        if plan.sortMode == .gpu {
+        if plan.sortMode == .gpu || plan.sortMode == .bitonic {
             let depthStart = CFAbsoluteTimeGetCurrent()
             encodeDepthKeys(
                 commandBuffer: commandBuffer,
@@ -183,13 +198,17 @@ public final class SplatRenderer {
                 orderBuffer: orderBuffer,
                 uniformBuffer: uniformBuffer,
                 count: plan.drawCount,
-                paddedCount: plan.sortPaddedCount,
+                paddedCount: plan.sortMode == .bitonic ? plan.sortPaddedCount : plan.drawCount,
                 sourceCount: plan.totalSplats
             )
             depthKeyMilliseconds = milliseconds(since: depthStart)
 
             let sortStart = CFAbsoluteTimeGetCurrent()
-            encodeBitonicSort(commandBuffer: commandBuffer, orderBuffer: orderBuffer, count: plan.drawCount, paddedCount: plan.sortPaddedCount, sourceCount: plan.totalSplats)
+            if plan.sortMode == .bitonic {
+                encodeBitonicSort(commandBuffer: commandBuffer, orderBuffer: orderBuffer, count: plan.drawCount, paddedCount: plan.sortPaddedCount, sourceCount: plan.totalSplats)
+            } else if let radixResources {
+                encodeRadixSort(commandBuffer: commandBuffer, orderBuffer: orderBuffer, radixResources: radixResources, count: plan.drawCount)
+            }
             sortMilliseconds = milliseconds(since: sortStart)
         } else {
             let sortStart = CFAbsoluteTimeGetCurrent()
@@ -365,6 +384,76 @@ public final class SplatRenderer {
                 j /= 2
             }
             k *= 2
+        }
+    }
+
+    private func encodeRadixSort(commandBuffer: MTLCommandBuffer, orderBuffer: MTLBuffer, radixResources: RadixResources, count: Int) {
+        guard count > 1 else { return }
+
+        let radixBuckets = 256
+        let blockSize = 256
+        let blockCount = max(1, (count + blockSize - 1) / blockSize)
+        let histogramLength = radixBuckets * blockCount * MemoryLayout<UInt32>.stride
+        let threadsPerGroup = MTLSize(width: blockSize, height: 1, depth: 1)
+        let groups = MTLSize(width: blockCount, height: 1, depth: 1)
+
+        for pass in 0..<4 {
+            if let blit = commandBuffer.makeBlitCommandEncoder() {
+                blit.label = "SplatRenderer.radix.clear.\(pass)"
+                blit.fill(buffer: radixResources.histogramBuffer, range: 0..<histogramLength, value: 0)
+                blit.endEncoding()
+            }
+
+            let sourceBuffer = pass.isMultiple(of: 2) ? orderBuffer : radixResources.scratchBuffer
+            let destinationBuffer = pass.isMultiple(of: 2) ? radixResources.scratchBuffer : orderBuffer
+            var constants = RadixConstants(
+                count: UInt32(count),
+                blockSize: UInt32(blockSize),
+                blockCount: UInt32(blockCount),
+                shift: UInt32(pass * 8)
+            )
+
+            if let encoder = commandBuffer.makeComputeCommandEncoder() {
+                encoder.label = "SplatRenderer.radix.histogram.\(pass)"
+                encoder.setComputePipelineState(radixHistogramPipeline)
+                encoder.setBuffer(sourceBuffer, offset: 0, index: 0)
+                encoder.setBuffer(radixResources.histogramBuffer, offset: 0, index: 1)
+                encoder.setBytes(&constants, length: MemoryLayout<RadixConstants>.stride, index: 2)
+                encoder.dispatchThreadgroups(groups, threadsPerThreadgroup: threadsPerGroup)
+                encoder.endEncoding()
+            }
+
+            if let encoder = commandBuffer.makeComputeCommandEncoder() {
+                encoder.label = "SplatRenderer.radix.prefix.\(pass)"
+                encoder.setComputePipelineState(radixPrefixPipeline)
+                encoder.setBuffer(radixResources.histogramBuffer, offset: 0, index: 0)
+                encoder.setBuffer(radixResources.offsetBuffer, offset: 0, index: 1)
+                encoder.setBuffer(radixResources.bucketTotalBuffer, offset: 0, index: 2)
+                encoder.setBytes(&constants, length: MemoryLayout<RadixConstants>.stride, index: 3)
+                encoder.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+                encoder.endEncoding()
+            }
+
+            if let encoder = commandBuffer.makeComputeCommandEncoder() {
+                encoder.label = "SplatRenderer.radix.bucketStarts.\(pass)"
+                encoder.setComputePipelineState(radixBucketStartPipeline)
+                encoder.setBuffer(radixResources.bucketTotalBuffer, offset: 0, index: 0)
+                encoder.setBuffer(radixResources.bucketStartBuffer, offset: 0, index: 1)
+                encoder.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
+                encoder.endEncoding()
+            }
+
+            if let encoder = commandBuffer.makeComputeCommandEncoder() {
+                encoder.label = "SplatRenderer.radix.scatter.\(pass)"
+                encoder.setComputePipelineState(radixScatterPipeline)
+                encoder.setBuffer(sourceBuffer, offset: 0, index: 0)
+                encoder.setBuffer(destinationBuffer, offset: 0, index: 1)
+                encoder.setBuffer(radixResources.offsetBuffer, offset: 0, index: 2)
+                encoder.setBuffer(radixResources.bucketStartBuffer, offset: 0, index: 3)
+                encoder.setBytes(&constants, length: MemoryLayout<RadixConstants>.stride, index: 4)
+                encoder.dispatchThreadgroups(groups, threadsPerThreadgroup: threadsPerGroup)
+                encoder.endEncoding()
+            }
         }
     }
 
@@ -609,6 +698,46 @@ public final class SplatRenderer {
         return buffer
     }
 
+    private func radixResources(drawCount: Int, frameResource: inout FrameResources) throws -> RadixResources {
+        let blockSize = 256
+        let radixBuckets = 256
+        let blockCount = max(1, (drawCount + blockSize - 1) / blockSize)
+        if let resources = frameResource.radixResources,
+           resources.pairCapacity >= drawCount,
+           resources.blockCapacity >= blockCount {
+            return resources
+        }
+
+        let pairLength = drawCount * MemoryLayout<SortPair>.stride
+        let histogramLength = radixBuckets * blockCount * MemoryLayout<UInt32>.stride
+        let bucketStartLength = radixBuckets * MemoryLayout<UInt32>.stride
+        guard
+            let scratch = device.makeBuffer(length: pairLength, options: .storageModePrivate),
+            let histogram = device.makeBuffer(length: histogramLength, options: .storageModePrivate),
+            let offsets = device.makeBuffer(length: histogramLength, options: .storageModePrivate),
+            let bucketTotals = device.makeBuffer(length: bucketStartLength, options: .storageModePrivate),
+            let bucketStarts = device.makeBuffer(length: bucketStartLength, options: .storageModePrivate)
+        else {
+            throw SplatError.metalUnavailable
+        }
+        scratch.label = "SplatRenderer.radix.scratch"
+        histogram.label = "SplatRenderer.radix.histograms"
+        offsets.label = "SplatRenderer.radix.offsets"
+        bucketTotals.label = "SplatRenderer.radix.bucketTotals"
+        bucketStarts.label = "SplatRenderer.radix.bucketStarts"
+        let resources = RadixResources(
+            scratchBuffer: scratch,
+            histogramBuffer: histogram,
+            offsetBuffer: offsets,
+            bucketTotalBuffer: bucketTotals,
+            bucketStartBuffer: bucketStarts,
+            pairCapacity: drawCount,
+            blockCapacity: blockCount
+        )
+        frameResource.radixResources = resources
+        return resources
+    }
+
     private func makeSceneResources(packedSplats: [PackedSplat]) throws -> SceneResources {
         let splatCount = packedSplats.count
         let splatLength = max(1, splatCount) * MemoryLayout<PackedSplat>.stride
@@ -648,6 +777,7 @@ public final class SplatRenderer {
             frameResources[index].activeMode = nil
             frameResources[index].projectedBuffer = nil
             frameResources[index].projectedCapacity = 0
+            frameResources[index].radixResources = nil
         }
     }
 
@@ -676,6 +806,13 @@ public final class SplatRenderer {
             total += UInt64(drawCount) * (splatStride + pairStride + projectedStride)
         }
         if mode == .gpu {
+            let sortCount = UInt64(drawCount)
+            let blockCount = UInt64(max(1, (drawCount + 255) / 256))
+            let histogramBytes = UInt64(256) * blockCount * UInt64(MemoryLayout<UInt32>.stride)
+            let depthKeyBytes = sortCount * (splatStride + pairStride)
+            let sortBytes = UInt64(4) * (sortCount * pairStride * 2 + histogramBytes * 3)
+            total += depthKeyBytes + sortBytes
+        } else if mode == .bitonic {
             let sortCount = UInt64(sortPaddedCount)
             let depthKeyBytes = sortCount * (splatStride + pairStride)
             let stages = UInt64(bitonicStageCount(sortPaddedCount))
@@ -760,6 +897,7 @@ private struct FrameResources {
     var activeMode: SortMode?
     var projectedBuffer: MTLBuffer?
     var projectedCapacity: Int = 0
+    var radixResources: RadixResources?
 }
 
 private struct SceneResources {
@@ -774,6 +912,23 @@ private struct SortConstants {
     var j: UInt32
     var k: UInt32
     var sourceCount: UInt32
+}
+
+private struct RadixConstants {
+    var count: UInt32
+    var blockSize: UInt32
+    var blockCount: UInt32
+    var shift: UInt32
+}
+
+private struct RadixResources {
+    var scratchBuffer: MTLBuffer
+    var histogramBuffer: MTLBuffer
+    var offsetBuffer: MTLBuffer
+    var bucketTotalBuffer: MTLBuffer
+    var bucketStartBuffer: MTLBuffer
+    var pairCapacity: Int
+    var blockCapacity: Int
 }
 
 private struct ProjectedSplat {

@@ -32,6 +32,13 @@ struct SortConstants {
     uint sourceCount;
 };
 
+struct RadixConstants {
+    uint count;
+    uint blockSize;
+    uint blockCount;
+    uint shift;
+};
+
 struct ProjectedSplat {
     float4 clipCenter;
     float4 axis0Opacity;
@@ -211,6 +218,90 @@ kernel void bitonicSortKernel(
         pairs[i] = b;
         pairs[ixj] = a;
     }
+}
+
+kernel void radixHistogramKernel(
+    device const SortPair *source [[buffer(0)]],
+    device atomic_uint *histograms [[buffer(1)]],
+    constant RadixConstants &constants [[buffer(2)]],
+    uint gid [[thread_position_in_grid]],
+    uint blockID [[threadgroup_position_in_grid]]
+) {
+    if (gid >= constants.count) {
+        return;
+    }
+    uint digit = (source[gid].key >> constants.shift) & 0xffu;
+    atomic_fetch_add_explicit(&histograms[digit * constants.blockCount + blockID], 1u, memory_order_relaxed);
+}
+
+kernel void radixPrefixKernel(
+    device const atomic_uint *histograms [[buffer(0)]],
+    device uint *blockOffsets [[buffer(1)]],
+    device uint *bucketTotals [[buffer(2)]],
+    constant RadixConstants &constants [[buffer(3)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= 256) {
+        return;
+    }
+
+    uint bucketOffset = 0;
+    for (uint block = 0; block < constants.blockCount; ++block) {
+        uint histogramIndex = gid * constants.blockCount + block;
+        blockOffsets[histogramIndex] = bucketOffset;
+        bucketOffset += atomic_load_explicit(&histograms[histogramIndex], memory_order_relaxed);
+    }
+    bucketTotals[gid] = bucketOffset;
+}
+
+kernel void radixBucketStartKernel(
+    device const uint *bucketTotals [[buffer(0)]],
+    device uint *bucketStarts [[buffer(1)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid != 0) {
+        return;
+    }
+    uint globalOffset = 0;
+    for (int bucket = 255; bucket >= 0; --bucket) {
+        bucketStarts[bucket] = globalOffset;
+        globalOffset += bucketTotals[bucket];
+    }
+}
+
+kernel void radixScatterKernel(
+    device const SortPair *source [[buffer(0)]],
+    device SortPair *destination [[buffer(1)]],
+    device const uint *blockOffsets [[buffer(2)]],
+    device const uint *bucketStarts [[buffer(3)]],
+    constant RadixConstants &constants [[buffer(4)]],
+    uint gid [[thread_position_in_grid]],
+    uint localID [[thread_index_in_threadgroup]],
+    uint blockID [[threadgroup_position_in_grid]]
+) {
+    threadgroup uint localDigits[256];
+    threadgroup SortPair localPairs[256];
+
+    uint blockStart = blockID * constants.blockSize;
+    uint activeCount = min(constants.blockSize, constants.count - min(blockStart, constants.count));
+    bool active = localID < activeCount && gid < constants.count;
+    SortPair pair = active ? source[gid] : SortPair{0u, 0xffffffffu};
+    uint digit = (pair.key >> constants.shift) & 0xffu;
+    localPairs[localID] = pair;
+    localDigits[localID] = digit;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (!active) {
+        return;
+    }
+
+    uint localRank = 0;
+    for (uint i = 0; i < localID; ++i) {
+        localRank += localDigits[i] == digit ? 1u : 0u;
+    }
+    uint bucketIndex = digit * constants.blockCount + blockID;
+    uint outputIndex = bucketStarts[digit] + blockOffsets[bucketIndex] + localRank;
+    destination[outputIndex] = pair;
 }
 
 vertex VertexOut projectedSplatVertex(
