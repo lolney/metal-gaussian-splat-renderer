@@ -18,6 +18,8 @@ final class ViewerStore: ObservableObject {
 
     let maxHistory = 600
     let interactiveGPUSortLimit = 1_000_000
+    let previewSplatLimit = 500_000
+    let largeSceneDefaultBudget = 1_000_000
     private var loadGeneration = 0
 
     var diagnostics: SplatDiagnostics? {
@@ -39,14 +41,28 @@ final class ViewerStore: ObservableObject {
         isLoading = true
         loadError = nil
         statusMessage = "Loading \(url.lastPathComponent)..."
+        let previewLimit = previewSplatLimit
 
         Task {
             do {
+                do {
+                    let preview = try await Task.detached(priority: .userInitiated) {
+                        try SplatScene.loadPreview(url: url, maximumSplats: previewLimit)
+                    }.value
+                    guard generation == loadGeneration else { return }
+                    if preview.diagnostics.warnings.contains(where: { $0.hasPrefix("Preview loaded") }) {
+                        applyLoadedScene(preview, filename: url.lastPathComponent, isPreview: true)
+                    }
+                } catch {
+                    guard generation == loadGeneration else { return }
+                    statusMessage = "Preview unavailable for \(url.lastPathComponent); loading the full scene..."
+                }
+
                 let loaded = try await Task.detached(priority: .userInitiated) {
                     try SplatScene.load(url: url)
                 }.value
                 guard generation == loadGeneration else { return }
-                applyLoadedScene(loaded, filename: url.lastPathComponent)
+                applyLoadedScene(loaded, filename: url.lastPathComponent, isPreview: false)
             } catch {
                 guard generation == loadGeneration else { return }
                 isLoading = false
@@ -56,20 +72,20 @@ final class ViewerStore: ObservableObject {
         }
     }
 
-    private func applyLoadedScene(_ loaded: SplatScene, filename: String) {
+    private func applyLoadedScene(_ loaded: SplatScene, filename: String, isPreview: Bool) {
         scene = loaded
-        if loaded.count > interactiveGPUSortLimit, options.sortMode == .gpu {
-            options.sortMode = .unsorted
-            if options.maxVisibleSplats > 0 {
-                options.maxVisibleSplats = min(options.maxVisibleSplats, loaded.count)
-            }
-            statusMessage = "Large scene loaded in unsorted mode. Use the budget presets for faster previews, or GPU radix for a slower sorted reference."
+        if loaded.count > interactiveGPUSortLimit, options.sortMode == .gpu, options.maxVisibleSplats == 0 {
+            options.maxVisibleSplats = min(largeSceneDefaultBudget, loaded.count)
+            statusMessage = "Large scene loaded with a \(options.maxVisibleSplats.formatted()) splat GPU radix budget. Use the budget presets or All when you want a heavier reference."
         } else {
             statusMessage = nil
         }
-        isLoading = false
+        if isPreview {
+            statusMessage = "Previewing \(loaded.count.formatted()) splats while the full scene loads..."
+        }
+        isLoading = isPreview
         loadError = nil
-        markEvent("Loaded \(filename)")
+        markEvent(isPreview ? "Preview loaded \(filename)" : "Loaded \(filename)")
     }
 
     func record(_ stats: FrameStats) {

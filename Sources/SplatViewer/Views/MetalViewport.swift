@@ -44,6 +44,7 @@ struct MetalViewport: NSViewRepresentable {
         private var renderer: SplatRenderer?
         private weak var view: MTKView?
         private var loadedVertexCount: Int?
+        private var loadedSourceURL: URL?
 
         @MainActor
         init(store: ViewerStore) {
@@ -63,15 +64,21 @@ struct MetalViewport: NSViewRepresentable {
 
         @MainActor
         func loadSceneIfNeeded() {
-            guard let scene = store.scene, loadedVertexCount != scene.count else { return }
+            guard let scene = store.scene else { return }
+            let sourceURL = scene.diagnostics.sourceURL
+            guard loadedVertexCount != scene.count || loadedSourceURL != sourceURL else { return }
+            let shouldResetCamera = loadedSourceURL != sourceURL
             do {
                 try renderer?.load(scene: scene)
-                cameraController.focus(bounds: scene.bounds)
-                if let url = scene.diagnostics.sourceURL, BicycleCameraPreset.isBicycleScene(url), let preset = BicycleCameraPreset.preset(for: 0) {
-                    cameraController.useSavedCamera(preset)
-                    store.statusMessage = "Using saved bicycle camera 0 (\(preset.imageName)). Press 0-9 to switch saved bicycle cameras; drag, pan, or zoom to move from this camera."
+                if shouldResetCamera {
+                    cameraController.focus(bounds: scene.bounds)
+                    if BicycleCameraPreset.isBicycleScene(sourceURL), let preset = BicycleCameraPreset.preset(for: 0) {
+                        cameraController.useSavedCamera(preset)
+                        store.statusMessage = "Using saved bicycle camera 0 (\(preset.imageName)). Press 0-9 to switch saved bicycle cameras; drag, pan, or zoom to move from this camera."
+                    }
                 }
                 loadedVertexCount = scene.count
+                loadedSourceURL = sourceURL
             } catch {
                 store.loadError = error.localizedDescription
             }
@@ -132,7 +139,7 @@ final class InteractiveMTKView: MTKView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        cameraController?.zoom(delta: Float(event.scrollingDeltaY))
+        cameraController?.zoom(delta: -Float(event.scrollingDeltaY))
     }
 
     override func keyDown(with event: NSEvent) {
@@ -168,7 +175,7 @@ final class OrbitCameraController {
         pitch = 0
         savedCamera = nil
         referenceProjection = nil
-        freeCamera = nil
+        freeCamera = defaultFreeCameraState()
     }
 
     func useSavedCamera(_ preset: BicycleCameraPreset) {
@@ -178,32 +185,18 @@ final class OrbitCameraController {
     }
 
     func orbit(deltaX: Float, deltaY: Float) {
-        if useFreeCameraFromSavedCameraIfNeeded() || freeCamera != nil {
-            rotateFreeCamera(deltaX: deltaX, deltaY: deltaY)
-            return
-        }
-        yaw -= deltaX * 0.008
-        pitch = clamp(pitch - deltaY * 0.008, -1.45, 1.45)
+        ensureFreeCamera()
+        rotateFreeCamera(deltaX: deltaX, deltaY: deltaY)
     }
 
     func pan(deltaX: Float, deltaY: Float) {
-        if useFreeCameraFromSavedCameraIfNeeded() || freeCamera != nil {
-            panFreeCamera(deltaX: deltaX, deltaY: deltaY)
-            return
-        }
-        let scale = distance * 0.0015
-        let right = SIMD3<Float>(cos(yaw), 0, -sin(yaw))
-        let up = SIMD3<Float>(0, 1, 0)
-        center -= right * deltaX * scale
-        center += up * deltaY * scale
+        ensureFreeCamera()
+        panFreeCamera(deltaX: deltaX, deltaY: deltaY)
     }
 
     func zoom(delta: Float) {
-        if useFreeCameraFromSavedCameraIfNeeded() || freeCamera != nil {
-            zoomFreeCamera(delta: delta)
-            return
-        }
-        distance = clamp(distance * (1 - delta * 0.0015), radius * 0.05, radius * 50)
+        ensureFreeCamera()
+        zoomFreeCamera(delta: delta)
     }
 
     func camera(width: Int, height: Int) -> Camera {
@@ -232,6 +225,19 @@ final class OrbitCameraController {
         return .perspective(fovyRadians: 60 * .pi / 180, aspect: aspect, nearZ: max(radius * 0.001, 0.0001), farZ: max(radius * 100, 10))
     }
 
+    private func ensureFreeCamera() {
+        if useFreeCameraFromSavedCameraIfNeeded() || freeCamera != nil {
+            return
+        }
+        freeCamera = defaultFreeCameraState()
+    }
+
+    private func defaultFreeCameraState() -> FreeCameraState {
+        let eye = center + SIMD3<Float>(0, 0, distance)
+        let viewMatrix = simd_float4x4.lookAt(eye: eye, center: center, up: SIMD3<Float>(0, 1, 0))
+        return FreeCameraState(viewMatrix: viewMatrix, moveScale: max(radius, 0.1))
+    }
+
     @discardableResult
     private func useFreeCameraFromSavedCameraIfNeeded() -> Bool {
         guard let savedCamera else { return false }
@@ -243,12 +249,12 @@ final class OrbitCameraController {
     private func rotateFreeCamera(deltaX: Float, deltaY: Float) {
         guard var state = freeCamera else { return }
         var pose = CameraPose(viewMatrix: state.viewMatrix)
-        let yawRotation = simd_quatf(angle: -deltaX * 0.004, axis: SIMD3<Float>(0, 1, 0))
+        let yawRotation = simd_quatf(angle: deltaX * 0.004, axis: SIMD3<Float>(0, 1, 0))
         pose.forward = yawRotation.act(pose.forward)
         pose.up = yawRotation.act(pose.up)
         pose.orthonormalize()
 
-        let pitchRotation = simd_quatf(angle: -deltaY * 0.004, axis: pose.right)
+        let pitchRotation = simd_quatf(angle: deltaY * 0.004, axis: pose.right)
         pose.forward = pitchRotation.act(pose.forward)
         pose.up = pitchRotation.act(pose.up)
         pose.orthonormalize()

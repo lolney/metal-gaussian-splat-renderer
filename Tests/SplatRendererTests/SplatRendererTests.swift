@@ -38,6 +38,31 @@ struct PLYLoaderTests {
         #expect(scene.splats[0].opacity > scene.splats[1].opacity)
     }
 
+    @Test("preview loading samples large PLY inputs")
+    func previewLoadingSamplesPLY() throws {
+        let url = try temporaryPLY("""
+        ply
+        format ascii 1.0
+        element vertex 5
+        property float x
+        property float y
+        property float z
+        property float opacity
+        end_header
+        0 0 0 0
+        1 0 0 0
+        2 0 0 0
+        3 0 0 0
+        4 0 0 0
+        """)
+
+        let scene = try SplatScene.loadPreview(url: url, maximumSplats: 3)
+        #expect(scene.count == 3)
+        #expect(scene.diagnostics.vertexCount == 3)
+        #expect(scene.diagnostics.warnings.contains { $0.contains("Preview loaded 3 of 5 splats") })
+        #expect(scene.bounds.maximum[0] == 4)
+    }
+
     @Test("loads binary little-endian Gaussian PLY")
     func loadsBinaryLittleEndianPLY() throws {
         let header = [

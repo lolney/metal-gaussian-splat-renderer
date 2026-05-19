@@ -15,7 +15,12 @@ public struct SplatScene: Sendable {
 
     public static func load(url: URL) throws -> SplatScene {
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        return try PLYLoader.load(data: data, sourceURL: url)
+        return try PLYLoader.load(data: data, sourceURL: url, maximumSplats: nil)
+    }
+
+    public static func loadPreview(url: URL, maximumSplats: Int) throws -> SplatScene {
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        return try PLYLoader.load(data: data, sourceURL: url, maximumSplats: max(1, maximumSplats))
     }
 
     public func packedSplats() -> [PackedSplat] {
@@ -67,22 +72,22 @@ private struct PLYHeader {
 }
 
 private enum PLYLoader {
-    static func load(data: Data, sourceURL: URL?) throws -> SplatScene {
+    static func load(data: Data, sourceURL: URL?, maximumSplats: Int?) throws -> SplatScene {
         let header = try parseHeader(data: data)
         if header.format == .binaryLittleEndian {
-            return try parseBinaryLittleEndianScene(data: data, header: header, sourceURL: sourceURL)
+            return try parseBinaryLittleEndianScene(data: data, header: header, sourceURL: sourceURL, maximumSplats: maximumSplats)
         }
         let rows: [[String: Float]]
         switch header.format {
         case .ascii:
-            rows = try parseASCII(data: data, header: header)
+            rows = try parseASCII(data: data, header: header, maximumSplats: maximumSplats)
         case .binaryLittleEndian:
-            rows = try parseBinaryLittleEndian(data: data, header: header)
+            rows = try parseBinaryLittleEndian(data: data, header: header, maximumSplats: maximumSplats)
         }
-        return try makeScene(rows: rows, header: header, sourceURL: sourceURL)
+        return try makeScene(rows: rows, header: header, sourceURL: sourceURL, sourceVertexCount: header.vertexCount)
     }
 
-    private static func parseBinaryLittleEndianScene(data: Data, header: PLYHeader, sourceURL: URL?) throws -> SplatScene {
+    private static func parseBinaryLittleEndianScene(data: Data, header: PLYHeader, sourceURL: URL?, maximumSplats: Int?) throws -> SplatScene {
         let names = Set(header.properties.map(\.name))
         let required = ["x", "y", "z"]
         let missing = required.filter { !names.contains($0) }
@@ -127,9 +132,11 @@ private enum PLYLoader {
             return try readScalar(data: data, offset: rowStart + offset, type: type)
         }
 
+        let selectedRows = selectedRowIndices(vertexCount: header.vertexCount, maximumSplats: maximumSplats)
         var splats: [Splat] = []
-        splats.reserveCapacity(header.vertexCount)
-        for rowIndex in 0..<header.vertexCount {
+        splats.reserveCapacity(selectedRows?.count ?? header.vertexCount)
+
+        func appendSplat(rowIndex: Int) throws {
             let rowStart = header.dataOffset + rowIndex * stride
             let position = SIMD3<Float>(
                 try value("x", rowStart: rowStart),
@@ -171,9 +178,21 @@ private enum PLYLoader {
             }
             splats.append(Splat(position: position, scale: scale, rotation: rotation, opacity: opacity, color: color))
         }
+        if let selectedRows {
+            for rowIndex in selectedRows {
+                try appendSplat(rowIndex: rowIndex)
+            }
+        } else {
+            for rowIndex in 0..<header.vertexCount {
+                try appendSplat(rowIndex: rowIndex)
+            }
+        }
         sortByRenderImportance(&splats)
 
         let bounds = makeBounds(splats: splats)
+        if splats.count < header.vertexCount {
+            warnings.append("Preview loaded \(splats.count.formatted()) of \(header.vertexCount.formatted()) splats while the full scene loads.")
+        }
         let diagnostics = SplatDiagnostics(
             sourceURL: sourceURL,
             format: header.format.rawValue,
@@ -248,7 +267,7 @@ private enum PLYLoader {
         return PLYHeader(format: format, vertexCount: vertexCount, properties: properties, dataOffset: headerRange.upperBound)
     }
 
-    private static func parseASCII(data: Data, header: PLYHeader) throws -> [[String: Float]] {
+    private static func parseASCII(data: Data, header: PLYHeader, maximumSplats: Int?) throws -> [[String: Float]] {
         guard let body = String(data: data[header.dataOffset...], encoding: .utf8) else {
             throw SplatError.invalidPLY("ASCII body is not UTF-8")
         }
@@ -256,7 +275,9 @@ private enum PLYLoader {
         guard lines.count >= header.vertexCount else {
             throw SplatError.invalidPLY("vertex count exceeds ASCII row count")
         }
-        return try lines.prefix(header.vertexCount).map { line in
+        let selectedRows = selectedRowIndices(vertexCount: header.vertexCount, maximumSplats: maximumSplats).map(Set.init)
+        return try lines.prefix(header.vertexCount).enumerated().compactMap { rowIndex, line in
+            guard selectedRows?.contains(rowIndex) ?? true else { return nil }
             let values = line.split(separator: " ")
             guard values.count >= header.properties.count else {
                 throw SplatError.invalidPLY("ASCII vertex row has too few values")
@@ -272,22 +293,37 @@ private enum PLYLoader {
         }
     }
 
-    private static func parseBinaryLittleEndian(data: Data, header: PLYHeader) throws -> [[String: Float]] {
+    private static func parseBinaryLittleEndian(data: Data, header: PLYHeader, maximumSplats: Int?) throws -> [[String: Float]] {
         let stride = header.properties.reduce(0) { $0 + $1.type.byteCount }
         let requiredBytes = header.dataOffset + stride * header.vertexCount
         guard data.count >= requiredBytes else {
             throw SplatError.invalidPLY("binary payload is shorter than vertex count requires")
         }
 
-        return try (0..<header.vertexCount).map { rowIndex in
+        let selectedRows = selectedRowIndices(vertexCount: header.vertexCount, maximumSplats: maximumSplats)
+        let outputCount = selectedRows?.count ?? header.vertexCount
+        var rows: [[String: Float]] = []
+        rows.reserveCapacity(outputCount)
+
+        func appendRow(rowIndex: Int) throws {
             var offset = header.dataOffset + rowIndex * stride
             var row: [String: Float] = [:]
             for property in header.properties {
                 row[property.name] = try readScalar(data: data, offset: offset, type: property.type)
                 offset += property.type.byteCount
             }
-            return row
+            rows.append(row)
         }
+        if let selectedRows {
+            for rowIndex in selectedRows {
+                try appendRow(rowIndex: rowIndex)
+            }
+        } else {
+            for rowIndex in 0..<header.vertexCount {
+                try appendRow(rowIndex: rowIndex)
+            }
+        }
+        return rows
     }
 
     private static func readScalar(data: Data, offset: Int, type: PLYScalarType) throws -> Float {
@@ -319,7 +355,7 @@ private enum PLYLoader {
         }
     }
 
-    private static func makeScene(rows: [[String: Float]], header: PLYHeader, sourceURL: URL?) throws -> SplatScene {
+    private static func makeScene(rows: [[String: Float]], header: PLYHeader, sourceURL: URL?, sourceVertexCount: Int) throws -> SplatScene {
         let names = Set(header.properties.map(\.name))
         let required = ["x", "y", "z"]
         let missing = required.filter { !names.contains($0) }
@@ -344,6 +380,9 @@ private enum PLYLoader {
         }
         if !hasOpacity {
             warnings.append("No opacity field found; using opaque splats.")
+        }
+        if rows.count < sourceVertexCount {
+            warnings.append("Preview loaded \(rows.count.formatted()) of \(sourceVertexCount.formatted()) splats while the full scene loads.")
         }
 
         var splats = rows.map { row in
@@ -417,6 +456,17 @@ private enum PLYLoader {
     private static func sortByRenderImportance(_ splats: inout [Splat]) {
         splats.sort { lhs, rhs in
             renderImportance(lhs) > renderImportance(rhs)
+        }
+    }
+
+    private static func selectedRowIndices(vertexCount: Int, maximumSplats: Int?) -> [Int]? {
+        guard let maximumSplats, maximumSplats > 0, maximumSplats < vertexCount else {
+            return nil
+        }
+        guard maximumSplats > 1 else { return [0] }
+        let stride = Double(vertexCount - 1) / Double(maximumSplats - 1)
+        return (0..<maximumSplats).map { index in
+            min(vertexCount - 1, Int((Double(index) * stride).rounded()))
         }
     }
 

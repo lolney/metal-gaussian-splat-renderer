@@ -107,7 +107,7 @@ private struct TimingOverlay: View {
             if let last = store.frameHistory.last {
                 Text(String(format: "%.2f ms  %.0f FPS", last.totalFrameMilliseconds, 1000 / max(last.totalFrameMilliseconds, 0.001)))
                     .font(.system(.headline, design: .monospaced))
-                Text("\(last.totalSplats) splats  \(last.sortMode.displayName) sort")
+                Text("\(last.visibleSplats.formatted()) / \(last.totalSplats.formatted()) splats  \(last.sortMode.displayName) sort")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
