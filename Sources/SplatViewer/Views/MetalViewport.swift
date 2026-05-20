@@ -143,6 +143,9 @@ final class InteractiveMTKView: MTKView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if handleArrowKey(event) {
+            return
+        }
         guard
             let characters = event.charactersIgnoringModifiers,
             characters.count == 1,
@@ -154,6 +157,26 @@ final class InteractiveMTKView: MTKView {
         }
         cameraController?.useSavedCamera(preset)
         onCameraPresetSelected?(preset)
+    }
+
+    private func handleArrowKey(_ event: NSEvent) -> Bool {
+        let speed: Float = event.modifierFlags.contains(.shift) ? 3 : 1
+        switch event.keyCode {
+        case 126:
+            cameraController?.move(forward: 1, speedMultiplier: speed)
+            return true
+        case 125:
+            cameraController?.move(forward: -1, speedMultiplier: speed)
+            return true
+        case 123:
+            cameraController?.move(right: -1, speedMultiplier: speed)
+            return true
+        case 124:
+            cameraController?.move(right: 1, speedMultiplier: speed)
+            return true
+        default:
+            return false
+        }
     }
 }
 
@@ -197,6 +220,11 @@ final class OrbitCameraController {
     func zoom(delta: Float) {
         ensureFreeCamera()
         zoomFreeCamera(delta: delta)
+    }
+
+    func move(forward: Float = 0, right: Float = 0, up: Float = 0, speedMultiplier: Float = 1) {
+        ensureFreeCamera()
+        moveFreeCamera(forward: forward, right: right, up: up, speedMultiplier: speedMultiplier)
     }
 
     func camera(width: Int, height: Int) -> Camera {
@@ -278,6 +306,17 @@ final class OrbitCameraController {
         let step = state.moveScale * delta * 0.003
         pose.eye += pose.forward * step
         state.moveScale = clamp(state.moveScale * (1 - delta * 0.001), radius * 0.02, radius * 10)
+        state.viewMatrix = pose.viewMatrix
+        freeCamera = state
+    }
+
+    private func moveFreeCamera(forward: Float, right: Float, up: Float, speedMultiplier: Float) {
+        guard var state = freeCamera else { return }
+        var pose = CameraPose(viewMatrix: state.viewMatrix)
+        let step = state.moveScale * 0.03 * speedMultiplier
+        pose.eye += pose.forward * forward * step
+        pose.eye += pose.right * right * step
+        pose.eye += pose.up * up * step
         state.viewMatrix = pose.viewMatrix
         freeCamera = state
     }
